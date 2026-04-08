@@ -9,15 +9,16 @@ function collectCurrentQuestion() {
             throw new Error('未找到题目元素');
         }
 
+        // 题目内容在第一个div的文本中（排除第二个div的分类信息）
         let questionText = '';
-        const questionParagraph = questionElement.querySelector('p');
-        if (questionParagraph) {
-            questionText = questionParagraph.textContent.trim();
-        } else {
-            const contentElements = questionElement.querySelectorAll('div, span, p');
-            for (let i = 0; i < contentElements.length; i++) {
-                const element = contentElements[i];
-                const text = element.textContent.trim();
+
+        // 获取所有子元素
+        const children = questionElement.children;
+        for (let i = 0; i < children.length; i++) {
+            const child = children[i];
+            // 找到第一个包含题目内容的div，跳过分类div
+            if (!child.className.includes('secondChapterName')) {
+                const text = child.textContent.trim();
                 if (text && text.length > 10) {
                     questionText = text;
                     break;
@@ -25,13 +26,31 @@ function collectCurrentQuestion() {
             }
         }
 
+        // 如果没找到，尝试直接获取div的文本内容
+        if (!questionText) {
+            const text = questionElement.firstElementChild.textContent.trim();
+            if (text && text.length > 10) {
+                questionText = text;
+            }
+        }
+
+        // 清理题目文本中的空白字符
+        if (questionText) {
+            questionText = questionText.replace(/\s+/g, ' ').trim();
+        }
+
+        console.log('提取的题目:', questionText);
+
         if (!questionText) {
             throw new Error('未找到题目内容');
         }
 
+        // 获取分类信息
         const categoryElement = questionElement.querySelector('.secondChapterName');
         const category = categoryElement ? categoryElement.textContent.trim() : '';
+        console.log('分类:', category);
 
+        // 获取选项
         const optionsElement = document.querySelector('.questionaw');
         if (!optionsElement) {
             throw new Error('未找到选项元素');
@@ -49,11 +68,13 @@ function collectCurrentQuestion() {
                 options.push(`${optionLabel} ${optionContent}`);
             }
         });
+        console.log('找到选项数量:', options.length);
 
-        const answerElement = document.querySelector('.answer-to-the-question');
+        // 获取答案信息
         let correctAnswer = '';
         let userAnswer = '';
 
+        const answerElement = document.querySelector('.answer-to-the-question');
         if (answerElement) {
             const rightKeyElements = answerElement.querySelectorAll('.right-key');
             rightKeyElements.forEach(el => {
@@ -65,9 +86,12 @@ function collectCurrentQuestion() {
                 }
             });
         }
+        console.log('正确答案:', correctAnswer, '用户答案:', userAnswer);
 
+        // 获取解析
         const analysisElement = document.querySelector('.right-key.paddlr.lgccquestfont1');
         const analysis = analysisElement ? analysisElement.textContent.trim() : '';
+        console.log('解析:', analysis);
 
         const questionData = {
             question_id: Date.now().toString(),
@@ -79,7 +103,11 @@ function collectCurrentQuestion() {
             analysis: analysis
         };
 
-        sendToBackend(questionData);
+        console.log('采集的数据:', JSON.stringify(questionData, null, 2));
+
+        // 通过background script发送数据，避免CORS问题
+        sendToBackendViaBackground(questionData);
+
         return { success: true, data: questionData };
     } catch (error) {
         console.error('采集题目失败:', error);
@@ -91,86 +119,29 @@ function collectCurrentQuestion() {
 function collectAllWrongQuestions() {
     try {
         console.log('开始采集所有可见错题');
-
-        // 查找页面上所有可能的题目容器
-        const questionContainers = document.querySelectorAll('[id*="question"], .question-item, .question-card');
-
-        if (questionContainers.length === 0) {
-            // 如果没有找到专用容器，尝试采集当前页面
-            const result = collectCurrentQuestion();
-            return result;
-        }
-
-        let collectedCount = 0;
-        const results = [];
-
-        questionContainers.forEach((container, index) => {
-            try {
-                const questionText = container.querySelector('p, .question-text, .question-content');
-                const optionsContainer = container.querySelector('.options, .question-options');
-
-                if (questionText && optionsContainer) {
-                    const questionData = {
-                        question_id: `batch_${Date.now()}_${index}`,
-                        question: questionText.textContent.trim(),
-                        options: [],
-                        correct_answer: '',
-                        user_answer: '',
-                        category: '',
-                        analysis: ''
-                    };
-
-                    const optionElements = optionsContainer.querySelectorAll('.option, .awoption');
-                    optionElements.forEach(opt => {
-                        questionData.options.push(opt.textContent.trim());
-                    });
-
-                    sendToBackend(questionData);
-                    results.push(questionData);
-                    collectedCount++;
-                }
-            } catch (e) {
-                console.error(`采集第 ${index + 1} 个题目失败:`, e);
-            }
-        });
-
-        if (collectedCount > 0) {
-            showNotification(`成功采集 ${collectedCount} 道题目！`, 'success');
-        } else {
-            // 如果批量采集失败，尝试采集当前题目
-            const result = collectCurrentQuestion();
-            return result;
-        }
-
-        return { success: true, count: collectedCount };
+        const result = collectCurrentQuestion();
+        return result;
     } catch (error) {
         console.error('采集所有错题失败:', error);
         return { success: false, error: error.message };
     }
 }
 
-// 发送数据到后端
-function sendToBackend(data) {
-    console.log('准备发送数据到后端:', JSON.stringify(data, null, 2));
+// 通过background script发送数据到后端
+function sendToBackendViaBackground(data) {
+    console.log('通过background script发送数据');
 
-    fetch('http://localhost:5002/api/wrong-questions', {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json'
-        },
-        body: JSON.stringify(data)
-    })
-    .then(response => {
-        console.log('收到响应状态:', response.status);
-        return response.json();
-    })
-    .then(result => {
-        console.log('发送成功:', result);
+    chrome.runtime.sendMessage({
+        action: 'sendToBackend',
+        data: data
+    }, function(response) {
+        if (chrome.runtime.lastError) {
+            console.error('发送失败:', chrome.runtime.lastError);
+            showNotification('发送失败：' + chrome.runtime.lastError.message, 'error');
+            return;
+        }
+        console.log('发送成功:', response);
         showNotification('采集成功！', 'success');
-    })
-    .catch(error => {
-        console.error('发送失败:', error);
-        showNotification('采集失败：' + error.message, 'error');
     });
 }
 
@@ -210,7 +181,7 @@ function showNotification(message, type) {
 
 // 监听来自popup和background的消息
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
-    console.log('收到消息:', request);
+    console.log('content.js收到消息:', request);
 
     if (request.action === 'collectCurrentQuestion') {
         const result = collectCurrentQuestion();
@@ -223,9 +194,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
 });
 
-// 键盘快捷键监听（在页面上监听 Ctrl+Shift+C）
+// 键盘快捷键监听
 document.addEventListener('keydown', function(e) {
-    // 检测 Ctrl+Shift+C (Windows/Linux) 或 Command+Shift+C (Mac)
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
         console.log('快捷键 Ctrl+Shift+C 被触发');
         e.preventDefault();
