@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html>
+<head>
+    <meta charset="UTF-8">
+    <title>软考达人做题记录采集</title>
+    <style>
+        body {
+            width: 300px;
+            padding: 10px;
+            font-family: Arial, sans-serif;
+        }
+        h1 {
+            font-size: 16px;
+            margin-bottom: 10px;
+        }
+        button {
+            width: 100%;
+            padding: 8px;
+            margin: 5px 0;
+            background-color: #4CAF50;
+            color: white;
+            border: none;
+            border-radius: 4px;
+            cursor: pointer;
+        }
+        button:hover {
+            background-color: #45a049;
+        }
+        #status {
+            margin-top: 10px;
+            padding: 5px;
+            border-radius: 4px;
+        }
+        .success {
+            background-color: #d4edda;
+            color: #155724;
+        }
+        .error {
+            background-color: #f8d7da;
+            color: #721c24;
+        }
+    </style>
+</head>
+<body>
+    <h1>软考达人做题记录采集</h1>
+    <button id="collect">采集当前题目</button>
+    <button id="collectAll">采集所有错题</button>
+    <div id="status"></div>
+    <script src="popup.js"></script>
+</body>
+</html>
