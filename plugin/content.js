@@ -88,17 +88,28 @@ function collectCurrentQuestion() {
         }
         console.log('正确答案:', correctAnswer, '用户答案:', userAnswer);
 
-        // 获取解析 - 查找包含"解析"文字的容器后的.right-key
-        const answerContainer = document.querySelector('.answer-to-the-question');
+        // 获取解析 - 兼容多种页面结构
         let analysis = '';
+        const answerContainer = document.querySelector('.answer-to-the-question');
         if (answerContainer) {
-            const dividerText = answerContainer.querySelector('.el-divider__text');
-            if (dividerText && dividerText.textContent.includes('解析')) {
-                const rightKeys = answerContainer.querySelectorAll('.right-key');
-                rightKeys.forEach(el => {
-                    const text = el.textContent.trim();
-                    if (text.startsWith('解析')) {
-                        analysis = text.replace('解析', '').trim();
+            // 方式1：通过解析分隔符定位
+            const allRightKeys = answerContainer.querySelectorAll('.right-key');
+            for (const el of allRightKeys) {
+                const text = el.textContent.trim();
+                if (text.includes('解析') && text.length > 3) {
+                    analysis = text.replace(/^.*解析/, '').trim();
+                    break;
+                }
+            }
+            // 方式2：备用方案 - 查找包含"解析"文字的下一个兄弟元素
+            if (!analysis) {
+                const dividers = answerContainer.querySelectorAll('.el-divider__text');
+                dividers.forEach(divider => {
+                    if (divider.textContent.includes('解析')) {
+                        const parent = divider.parentElement;
+                        if (parent && parent.nextElementSibling) {
+                            analysis = parent.nextElementSibling.textContent.trim();
+                        }
                     }
                 });
             }
