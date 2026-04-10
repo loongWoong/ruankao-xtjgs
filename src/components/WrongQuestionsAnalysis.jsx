@@ -7,28 +7,63 @@ function WrongQuestionsAnalysis() {
     daily_stats: []
   });
   const [wrongQuestions, setWrongQuestions] = useState([]);
+  const [expandedId, setExpandedId] = useState(null);
+  const [notes, setNotes] = useState({});
+  const [editingNote, setEditingNote] = useState(null);
+  const [noteContent, setNoteContent] = useState('');
 
-  // 加载错题分析数据
   useEffect(() => {
-    fetch('http://localhost:5002/api/wrong-questions/analysis')
+    fetch('http://localhost:5002/api/stats/overview')
       .then(response => response.json())
       .then(data => {
-        setAnalysisData(data);
+        setAnalysisData({
+          total_wrong: data.total_wrong_questions || 0,
+          category_stats: [],
+          daily_stats: []
+        });
       })
       .catch(error => {
-        console.error('Error loading analysis data:', error);
+        console.error('Error loading overview data:', error);
       });
 
-    // 加载错题列表
     fetch('http://localhost:5002/api/wrong-questions')
       .then(response => response.json())
       .then(data => {
-        setWrongQuestions(data);
+        const items = data.items || [];
+        setWrongQuestions(items);
+        items.forEach(q => loadNote(q.id));
       })
       .catch(error => {
         console.error('Error loading wrong questions:', error);
       });
   }, []);
+
+  const loadNote = (questionId) => {
+    fetch(`http://localhost:5002/api/notes/${questionId}`)
+      .then(res => res.json())
+      .then(data => {
+        setNotes(prev => ({ ...prev, [questionId]: data.content || '' }));
+      })
+      .catch(err => console.error('Error loading note:', err));
+  };
+
+  const saveNote = (questionId) => {
+    fetch('http://localhost:5002/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: questionId, content: noteContent })
+    })
+      .then(res => res.json())
+      .then(() => {
+        setNotes(prev => ({ ...prev, [questionId]: noteContent }));
+        setEditingNote(null);
+      })
+      .catch(err => console.error('Error saving note:', err));
+  };
+
+  const toggleExpand = (id) => {
+    setExpandedId(expandedId === id ? null : id);
+  };
 
   return (
     <div className="wrong-questions-container">
@@ -101,15 +136,62 @@ function WrongQuestionsAnalysis() {
           {wrongQuestions.length > 0 ? (
             wrongQuestions.map((question, index) => (
               <div key={index} className="wrong-question-item">
-                <div className="wrong-question-header">
+                <div className="wrong-question-header" onClick={() => toggleExpand(question.id)} style={{cursor: 'pointer'}}>
                   <span className="wrong-question-category">{question.category}</span>
-                  <span className="wrong-question-date">{new Date(question.timestamp).toLocaleString()}</span>
+                  <span className="wrong-question-date">{new Date(question.created_at).toLocaleString()}</span>
                 </div>
                 <p className="wrong-question-content">{question.question}</p>
                 <div className="wrong-question-answers">
                   <p><strong>你的答案:</strong> <span style={{ color: '#f44336' }}>{question.user_answer}</span></p>
                   <p><strong>正确答案:</strong> <span style={{ color: '#4caf50' }}>{question.correct_answer}</span></p>
                 </div>
+                {expandedId === question.id && (
+                  <div className="wrong-question-detail">
+                    {question.options && question.options.length > 0 && (
+                      <div className="question-options">
+                        <p><strong>选项：</strong></p>
+                        {question.options.map((opt, i) => (
+                          <p key={i} style={{ marginLeft: '1rem' }}>{opt}</p>
+                        ))}
+                      </div>
+                    )}
+                    {question.analysis && (
+                      <p className="question-analysis"><strong>解析：</strong>{question.analysis}</p>
+                    )}
+                    <div className="question-note-section">
+                      <div className="note-header">
+                        <strong>笔记：</strong>
+                        <button
+                          className="note-btn"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setEditingNote(question.id);
+                            setNoteContent(notes[question.id] || '');
+                          }}
+                        >
+                          {notes[question.id] ? '编辑笔记' : '添加笔记'}
+                        </button>
+                      </div>
+                      {editingNote === question.id ? (
+                        <div className="note-edit">
+                          <textarea
+                            value={noteContent}
+                            onChange={(e) => setNoteContent(e.target.value)}
+                            placeholder="写下你的笔记..."
+                            rows={4}
+                            style={{ width: '100%', marginTop: '0.5rem' }}
+                          />
+                          <div className="note-actions">
+                            <button className="note-save-btn" onClick={() => saveNote(question.id)}>保存</button>
+                            <button className="note-cancel-btn" onClick={() => setEditingNote(null)}>取消</button>
+                          </div>
+                        </div>
+                      ) : (
+                        notes[question.id] && <p className="note-content">{notes[question.id]}</p>
+                      )}
+                    </div>
+                  </div>
+                )}
               </div>
             ))
           ) : (

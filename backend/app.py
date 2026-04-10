@@ -69,6 +69,17 @@ def init_db():
     )
     ''')
 
+    cursor.execute('''
+    CREATE TABLE question_notes (
+        id INTEGER PRIMARY KEY AUTOINCREMENT,
+        question_id INTEGER NOT NULL,
+        content TEXT,
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+        FOREIGN KEY (question_id) REFERENCES wrong_questions (id) ON DELETE CASCADE
+    )
+    ''')
+
     conn.commit()
     conn.close()
     print(f"Database initialized at {DB_PATH}")
@@ -583,6 +594,55 @@ def get_categories():
     conn.close()
 
     return jsonify({'categories': categories})
+
+@app.route('/api/notes/<int:question_id>', methods=['GET'])
+def get_note(question_id):
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT * FROM question_notes WHERE question_id = ?', (question_id,))
+    row = cursor.fetchone()
+
+    conn.close()
+
+    if row:
+        return jsonify({
+            'id': row['id'],
+            'question_id': row['question_id'],
+            'content': row['content'],
+            'created_at': row['created_at'],
+            'updated_at': row['updated_at']
+        })
+    return jsonify({'content': ''})
+
+@app.route('/api/notes', methods=['POST'])
+def save_note():
+    data = request.get_json()
+    question_id = data.get('question_id')
+    content = data.get('content', '')
+
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT id FROM question_notes WHERE question_id = ?', (question_id,))
+    existing = cursor.fetchone()
+
+    if existing:
+        cursor.execute('''
+            UPDATE question_notes
+            SET content = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE question_id = ?
+        ''', (content, question_id))
+    else:
+        cursor.execute('''
+            INSERT INTO question_notes (question_id, content)
+            VALUES (?, ?)
+        ''', (question_id, content))
+
+    conn.commit()
+    conn.close()
+
+    return jsonify({'success': True})
 
 if __name__ == '__main__':
     app.run(debug=True, host='0.0.0.0', port=5002)

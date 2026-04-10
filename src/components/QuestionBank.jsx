@@ -12,10 +12,43 @@ function QuestionBank() {
     is_mastered: '',
     search: ''
   });
+  const [note, setNote] = useState('');
+  const [editingNote, setEditingNote] = useState(false);
+  const [noteContent, setNoteContent] = useState('');
 
   useEffect(() => {
     fetchQuestions();
   }, [page, filter]);
+
+  useEffect(() => {
+    if (selectedQuestion) {
+      loadNote(selectedQuestion.id);
+    }
+  }, [selectedQuestion]);
+
+  const loadNote = (questionId) => {
+    fetch(`http://localhost:5002/api/notes/${questionId}`)
+      .then(res => res.json())
+      .then(data => {
+        setNote(data.content || '');
+      })
+      .catch(err => console.error('Error loading note:', err));
+  };
+
+  const saveNote = () => {
+    if (!selectedQuestion) return;
+    fetch('http://localhost:5002/api/notes', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ question_id: selectedQuestion.id, content: noteContent })
+    })
+      .then(res => res.json())
+      .then(() => {
+        setNote(noteContent);
+        setEditingNote(false);
+      })
+      .catch(err => console.error('Error saving note:', err));
+  };
 
   const fetchQuestions = async () => {
     setLoading(true);
@@ -211,6 +244,41 @@ function QuestionBank() {
                   <p>{selectedQuestion.analysis}</p>
                 </div>
               )}
+
+              <div className="detail-section">
+                <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <h4>笔记</h4>
+                  <button
+                    className="btn btn-secondary"
+                    onClick={() => {
+                      setNoteContent(note);
+                      setEditingNote(!editingNote);
+                    }}
+                  >
+                    {editingNote ? '取消' : (note ? '编辑笔记' : '添加笔记')}
+                  </button>
+                </div>
+                {editingNote ? (
+                  <div style={{ marginTop: '0.5rem' }}>
+                    <textarea
+                      value={noteContent}
+                      onChange={(e) => setNoteContent(e.target.value)}
+                      placeholder="写下你的笔记..."
+                      rows={4}
+                      style={{ width: '100%', padding: '0.5rem', borderRadius: '4px', border: '1px solid #ddd' }}
+                    />
+                    <button
+                      className="btn btn-primary"
+                      onClick={saveNote}
+                      style={{ marginTop: '0.5rem' }}
+                    >
+                      保存
+                    </button>
+                  </div>
+                ) : (
+                  note && <p style={{ marginTop: '0.5rem', color: '#666' }}>{note}</p>
+                )}
+              </div>
 
               <div className="detail-section">
                 <h4>统计</h4>

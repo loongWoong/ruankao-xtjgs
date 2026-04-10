@@ -1,5 +1,5 @@
 // 采集当前题目信息
-function collectCurrentQuestion() {
+async function collectCurrentQuestion() {
     try {
         console.log('开始采集题目信息');
 
@@ -88,31 +88,35 @@ function collectCurrentQuestion() {
         }
         console.log('正确答案:', correctAnswer, '用户答案:', userAnswer);
 
-        // 获取解析 - 兼容多种页面结构
-        let analysis = '';
-        const answerContainer = document.querySelector('.answer-to-the-question');
-        if (answerContainer) {
-            // 方式1：通过解析分隔符定位
-            const allRightKeys = answerContainer.querySelectorAll('.right-key');
-            for (const el of allRightKeys) {
-                const text = el.textContent.trim();
-                if (text.includes('解析') && text.length > 3) {
-                    analysis = text.replace(/^.*解析/, '').trim();
-                    break;
-                }
-            }
-            // 方式2：备用方案 - 查找包含"解析"文字的下一个兄弟元素
-            if (!analysis) {
-                const dividers = answerContainer.querySelectorAll('.el-divider__text');
-                dividers.forEach(divider => {
+        // 获取解析 - 查找包含"解析"的容器
+        function getAnalysis() {
+            const allAnswerContainers = document.querySelectorAll('.answer-to-the-question');
+            for (const container of allAnswerContainers) {
+                const dividers = container.querySelectorAll('.el-divider__text');
+                for (const divider of dividers) {
                     if (divider.textContent.includes('解析')) {
-                        const parent = divider.parentElement;
-                        if (parent && parent.nextElementSibling) {
-                            analysis = parent.nextElementSibling.textContent.trim();
+                        const rightKeys = container.querySelectorAll('.right-key');
+                        for (const el of rightKeys) {
+                            const text = el.textContent.trim();
+                            if (text.length > 30) {
+                                return text;
+                            }
                         }
                     }
-                });
+                }
             }
+            return '';
+        }
+
+        let analysis = getAnalysis();
+        let retryCount = 0;
+        const maxRetries = 5;
+
+        while (!analysis && retryCount < maxRetries) {
+            retryCount++;
+            console.log('解析未获取到，等待500ms后重试第' + retryCount + '次');
+            await new Promise(resolve => setTimeout(resolve, 500));
+            analysis = getAnalysis();
         }
         console.log('解析:', analysis);
 
@@ -139,10 +143,10 @@ function collectCurrentQuestion() {
 }
 
 // 采集所有可见错题
-function collectAllWrongQuestions() {
+async function collectAllWrongQuestions() {
     try {
         console.log('开始采集所有可见错题');
-        const result = collectCurrentQuestion();
+        const result = await collectCurrentQuestion();
         return result;
     } catch (error) {
         console.error('采集所有错题失败:', error);
@@ -207,14 +211,12 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log('content.js收到消息:', request);
 
     if (request.action === 'collectCurrentQuestion') {
-        const result = collectCurrentQuestion();
-        sendResponse(result);
+        collectCurrentQuestion().then(sendResponse);
+        return true;
     } else if (request.action === 'collectAllWrongQuestions') {
-        const result = collectAllWrongQuestions();
-        sendResponse(result);
+        collectAllWrongQuestions().then(sendResponse);
+        return true;
     }
-
-    return true;
 });
 
 // 键盘快捷键监听
