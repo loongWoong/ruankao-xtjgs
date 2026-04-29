@@ -10,9 +10,9 @@ function Dashboard() {
     today_practiced: 0,
     today_correct_rate: 0
   });
-  const [categories, setCategories] = useState([]);
-  const [weakPoints, setWeakPoints] = useState([]);
+  const [cognitionMap, setCognitionMap] = useState([]);
   const [dailyStats, setDailyStats] = useState([]);
+  const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
@@ -21,22 +21,22 @@ function Dashboard() {
 
   const fetchData = async () => {
     try {
-      const [statsRes, categoriesRes, weakPointsRes, dailyRes] = await Promise.all([
+      const [statsRes, cognitionRes, dailyRes, conversionRes] = await Promise.all([
         fetch('http://localhost:5002/api/stats/overview'),
-        fetch('http://localhost:5002/api/stats/category'),
-        fetch('http://localhost:5002/api/stats/weak-points'),
-        fetch('http://localhost:5002/api/stats/daily?days=7')
+        fetch('http://localhost:5002/api/stats/cognition'),
+        fetch('http://localhost:5002/api/stats/daily?days=7'),
+        fetch('http://localhost:5002/api/metrics/repractice-conversion?days=7&hours=72')
       ]);
 
       const statsData = await statsRes.json();
-      const categoriesData = await categoriesRes.json();
-      const weakPointsData = await weakPointsRes.json();
+      const cognitionData = await cognitionRes.json();
       const dailyData = await dailyRes.json();
+      const conversionData = await conversionRes.json();
 
       setStats(statsData);
-      setCategories(categoriesData.categories || []);
-      setWeakPoints(weakPointsData.weak_points || []);
+      setCognitionMap(cognitionData.cognition_map || []);
       setDailyStats(dailyData.daily_stats || []);
+      setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
@@ -50,7 +50,7 @@ function Dashboard() {
 
   return (
     <div className="page-container">
-      <h1 className="page-title">学习总览</h1>
+      <h1 className="page-title">认知增强看板</h1>
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -60,119 +60,99 @@ function Dashboard() {
         </div>
 
         <div className="stat-card">
-          <div className="stat-card-title">已掌握</div>
-          <div className="stat-card-value" style={{ color: '#4caf50' }}>{stats.total_mastered}</div>
-          <div className="stat-card-sub">正确率超过70%的题目</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-card-title">未掌握</div>
-          <div className="stat-card-value" style={{ color: '#f44336' }}>{stats.total_not_mastered}</div>
-          <div className="stat-card-sub">还需继续练习的题目</div>
-        </div>
-
-        <div className="stat-card">
-          <div className="stat-card-title">掌握率</div>
-          <div className="stat-card-value">{stats.mastery_rate}%</div>
-          <div className="stat-card-sub">总体掌握进度</div>
+          <div className="stat-card-title">总体掌握率</div>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>{stats.mastery_rate}%</div>
+          <div className="stat-card-sub">认知状态提升进度</div>
         </div>
 
         <div className="stat-card">
           <div className="stat-card-title">今日练习</div>
           <div className="stat-card-value">{stats.today_practiced}</div>
-          <div className="stat-card-sub">今日已完成</div>
+          <div className="stat-card-sub">今日认知激活次数</div>
         </div>
 
         <div className="stat-card">
-          <div className="stat-card-title">正确率</div>
+          <div className="stat-card-title">今日正确率</div>
           <div className="stat-card-value">{stats.today_correct_rate}%</div>
-          <div className="stat-card-sub">今日答题正确率</div>
+          <div className="stat-card-sub">认知准确度</div>
+        </div>
+
+        <div className="stat-card">
+          <div className="stat-card-title">72h 二练转化</div>
+          <div className="stat-card-value" style={{ color: '#2196f3' }}>{conversion.conversion_rate}%</div>
+          <div className="stat-card-sub">{conversion.numerator_users}/{conversion.denominator_users} 用户</div>
         </div>
       </div>
 
-      <div className="dashboard-grid">
+      <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr' }}>
         <div className="section-card">
-          <h2 className="section-title">分类掌握度</h2>
-          {categories.length > 0 ? (
-            categories.map((cat, index) => (
-              <div className="category-item" key={index}>
-                <div className="category-header">
-                  <span className="category-name">{cat.name}</span>
-                  <span className="category-stats">
-                    {cat.mastered}/{cat.total} ({cat.mastery_rate}%)
-                  </span>
+          <h2 className="section-title">认知热力图 (知识点掌握度)</h2>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
+            {cognitionMap.length > 0 ? (
+              cognitionMap.map((kp, index) => (
+                <div 
+                  key={index} 
+                  className="cognition-bubble" 
+                  style={{ 
+                    padding: '1rem', 
+                    borderRadius: '12px', 
+                    backgroundColor: `rgba(244, 67, 54, ${1 - kp.score})`,
+                    border: '1px solid #ddd',
+                    transition: 'all 0.3s ease',
+                    cursor: 'pointer'
+                  }}
+                >
+                  <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{kp.name}</div>
+                  <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
+                    <span>掌握度: {Math.round(kp.score * 100)}%</span>
+                    <span>稳定性: {kp.stability.toFixed(1)}</span>
+                  </div>
+                  <div className="category-bar" style={{ height: '4px', background: '#eee', marginTop: '0.5rem' }}>
+                    <div className="category-bar-fill" style={{ width: `${kp.score * 100}%`, background: '#4caf50', height: '100%' }} />
+                  </div>
                 </div>
-                <div className="category-bar">
-                  <div
-                    className="category-bar-fill"
-                    style={{ width: `${cat.mastery_rate}%` }}
-                  />
-                </div>
+              ))
+            ) : (
+              <div className="empty-state">
+                <div className="empty-state-icon">🧠</div>
+                <p>暂无认知轨迹数据</p>
               </div>
-            ))
-          ) : (
-            <div className="empty-state">
-              <div className="empty-state-icon">📚</div>
-              <p>暂无分类数据</p>
-            </div>
-          )}
+            )}
+          </div>
         </div>
 
         <div className="section-card">
-          <h2 className="section-title">薄弱知识点</h2>
-          {weakPoints.length > 0 ? (
-            weakPoints.map((point, index) => (
-              <div className="weak-point-item" key={index}>
-                <div className="weak-point-rank">{index + 1}</div>
-                <div className="weak-point-info">
-                  <div className="weak-point-name">{point.name}</div>
-                  <div className="weak-point-stats">
-                    共 {point.total} 题，未掌握 {point.not_mastered} 题
+          <h2 className="section-title">学习趋势</h2>
+          {dailyStats.length > 0 ? (
+            <div className="chart-container">
+              <div className="chart-bars">
+                {dailyStats.map((day, index) => (
+                  <div key={index} className="chart-bar-item">
+                    <div
+                      className="chart-bar"
+                      style={{ height: `${day.practiced > 0 ? (day.practiced / Math.max(...dailyStats.map(d => d.practiced), 1) * 100) : 0}%` }}
+                    >
+                      <div className="chart-bar-value">{day.practiced}</div>
+                    </div>
+                    <div className="chart-bar-label">{day.date.slice(5)}</div>
+                    <div className="chart-bar-rate">{day.correct_rate}%</div>
                   </div>
-                </div>
-                <div className="weak-point-rate">{100 - point.weak_rate}%</div>
+                ))}
               </div>
-            ))
+            </div>
           ) : (
             <div className="empty-state">
-              <div className="empty-state-icon">🎯</div>
-              <p>暂无薄弱知识点</p>
+              <div className="empty-state-icon">📈</div>
+              <p>暂无学习数据</p>
             </div>
           )}
         </div>
-      </div>
-
-      <div className="section-card">
-        <h2 className="section-title">每日学习趋势</h2>
-        {dailyStats.length > 0 ? (
-          <div className="chart-container">
-            <div className="chart-bars">
-              {dailyStats.map((day, index) => (
-                <div key={index} className="chart-bar-item">
-                  <div
-                    className="chart-bar"
-                    style={{ height: `${day.practiced > 0 ? (day.practiced / Math.max(...dailyStats.map(d => d.practiced), 1) * 100) : 0}%` }}
-                  >
-                    <div className="chart-bar-value">{day.practiced}</div>
-                  </div>
-                  <div className="chart-bar-label">{day.date.slice(5)}</div>
-                  <div className="chart-bar-rate">{day.correct_rate}%</div>
-                </div>
-              ))}
-            </div>
-          </div>
-        ) : (
-          <div className="empty-state">
-            <div className="empty-state-icon">📈</div>
-            <p>暂无学习数据</p>
-          </div>
-        )}
       </div>
 
       <div className="section-card">
         <h2 className="section-title">快捷操作</h2>
         <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <Link to="/practice" className="btn btn-primary">开始练习</Link>
+          <Link to="/practice?mode=recommend" className="btn btn-primary">🔥 攻克薄弱点 (智能推荐)</Link>
           <Link to="/questions" className="btn btn-secondary">查看错题库</Link>
         </div>
       </div>
