@@ -19,12 +19,18 @@ function Dashboard() {
     fetchData();
   }, []);
 
+  const getUserId = () => {
+    const stored = localStorage.getItem('ruankao_user_id');
+    return stored || 'default_user';
+  };
+
   const fetchData = async () => {
     try {
+      const userId = getUserId();
       const [statsRes, cognitionRes, dailyRes, conversionRes] = await Promise.all([
-        fetch('http://localhost:5002/api/stats/overview'),
-        fetch('http://localhost:5002/api/stats/cognition'),
-        fetch('http://localhost:5002/api/stats/daily?days=7'),
+        fetch(`http://localhost:5002/api/stats/overview?user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/cognition?user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/daily?days=7&user_id=${encodeURIComponent(userId)}`),
         fetch('http://localhost:5002/api/metrics/repractice-conversion?days=7&hours=72')
       ]);
 
@@ -35,7 +41,7 @@ function Dashboard() {
 
       setStats(statsData);
       setCognitionMap(cognitionData.cognition_map || []);
-      setDailyStats(dailyData.daily_stats || []);
+      setDailyStats(dailyData.daily_stats || dailyData.daily || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
     } catch (error) {
       console.error('获取数据失败:', error);

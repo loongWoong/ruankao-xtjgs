@@ -204,20 +204,41 @@ async function collectAllWrongQuestions() {
     try {
         console.log('开始采集所有可见错题');
 
-        const questionSelectors = [
-            '.question-item',
-            '.exercise-item',
-            '.wrong-question-item',
-            '[class*="question"]',
-            '[class*="WrongQues"]'
-        ];
-
         let questionElements = [];
-        for (const selector of questionSelectors) {
-            const els = document.querySelectorAll(selector);
-            if (els.length > 1) {
-                questionElements = Array.from(els);
-                break;
+
+        const titleElements = document.querySelectorAll('#answerInfotitle, [id*="answerInfotitle"], .answerInfotitle');
+        if (titleElements.length > 0) {
+            for (const titleEl of titleElements) {
+                let container = titleEl.closest('[class*="question"], [class*="Question"], [class*="item"], [class*="card"], [class*="exercise"]');
+                if (!container) {
+                    container = titleEl.parentElement;
+                    while (container && container.parentElement && container.children.length < 3) {
+                        container = container.parentElement;
+                    }
+                }
+                if (container && !questionElements.includes(container)) {
+                    questionElements.push(container);
+                }
+            }
+        }
+
+        if (questionElements.length <= 1) {
+            const selectors = [
+                '.question-item',
+                '.exercise-item',
+                '.wrong-question-item',
+                '.question-card',
+                '.exam-question',
+                '[class*="question-item"]',
+                '[class*="QuestionItem"]',
+                '[class*="wrong-question"]'
+            ];
+            for (const selector of selectors) {
+                const els = document.querySelectorAll(selector);
+                if (els.length > 1) {
+                    questionElements = Array.from(els);
+                    break;
+                }
             }
         }
 

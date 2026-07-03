@@ -7,17 +7,23 @@ function Statistics() {
   const [dailyStats, setDailyStats] = useState([]);
   const [loading, setLoading] = useState(true);
 
+  const getUserId = () => {
+    const stored = localStorage.getItem('ruankao_user_id');
+    return stored || 'default_user';
+  };
+
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
     try {
+      const userId = getUserId();
       const [categoryRes, chapterRes, weakPointsRes, dailyRes] = await Promise.all([
-        fetch('http://localhost:5002/api/stats/category'),
-        fetch('http://localhost:5002/api/stats/chapter'),
-        fetch('http://localhost:5002/api/stats/weak-points'),
-        fetch('http://localhost:5002/api/stats/daily?days=30')
+        fetch(`http://localhost:5002/api/stats/category?user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/chapter?user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/weak-points?user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/daily?days=30&user_id=${encodeURIComponent(userId)}`)
       ]);
 
       const [categoryData, chapterData, weakPointsData, dailyData] = await Promise.all([
@@ -30,7 +36,7 @@ function Statistics() {
       setCategoryStats(categoryData.categories || []);
       setChapterStats(chapterData.chapters || []);
       setWeakPoints(weakPointsData.weak_points || []);
-      setDailyStats(dailyData.daily_stats || []);
+      setDailyStats(dailyData.daily_stats || dailyData.daily || []);
     } catch (error) {
       console.error('获取统计数据失败:', error);
     } finally {

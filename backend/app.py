@@ -18,12 +18,6 @@ def get_db():
     conn.row_factory = sqlite3.Row
     return conn
 
-def ensure_column(cursor, table, column, definition):
-    cursor.execute(f"PRAGMA table_info({table})")
-    existing = {row["name"] for row in cursor.fetchall()}
-    if column not in existing:
-        cursor.execute(f"ALTER TABLE {table} ADD COLUMN {column} {definition}")
-
 def ensure_schema():
     conn = get_db()
     cursor = conn.cursor()
@@ -45,10 +39,22 @@ def ensure_schema():
                 last_review_time DATETIME,
                 correct_count INTEGER DEFAULT 0,
                 wrong_count INTEGER DEFAULT 0,
+                srs_stage INTEGER DEFAULT 0,
+                next_review_time DATETIME,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
                 user_id TEXT DEFAULT 'default_user'
             )
         ''')
+
+        columns_to_add = [
+            ('srs_stage', 'INTEGER DEFAULT 0'),
+            ('next_review_time', 'DATETIME')
+        ]
+        for col_name, col_def in columns_to_add:
+            cursor.execute(f"PRAGMA table_info(wrong_questions)")
+            existing = {row["name"] for row in cursor.fetchall()}
+            if col_name not in existing:
+                cursor.execute(f"ALTER TABLE wrong_questions ADD COLUMN {col_name} {col_def}")
 
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS knowledge_points (
@@ -138,6 +144,54 @@ def ensure_schema():
     finally:
         conn.close()
 
+def _format_question(row):
+    return {
+        'id': row['id'],
+        'question_id': row['question_id'],
+        'question': row['question'],
+        'options': json.loads(row['options']) if row['options'] else [],
+        'user_answer': row['user_answer'],
+        'correct_answer': row['correct_answer'],
+        'analysis': row['analysis'],
+        'category': row['category'],
+        'chapter': row['chapter'],
+        'is_mastered': bool(row['is_mastered']),
+        'review_count': row['review_count'],
+        'last_review_time': row['last_review_time'],
+        'srs_stage': row['srs_stage'] if 'srs_stage' in row.keys() else 0,
+        'next_review_time': row['next_review_time'] if 'next_review_time' in row.keys() else None,
+        'created_at': row['created_at']
+    }
+
+SRS_INTERVALS = [1, 2, 4, 7, 15, 30, 60, 120]
+
+def update_srs(cursor, question_id, is_correct):
+    cursor.execute('SELECT srs_stage FROM wrong_questions WHERE id = ?', (question_id,))
+    row = cursor.fetchone()
+    if not row:
+        return
+    current_stage = row['srs_stage'] or 0
+
+    if is_correct:
+        new_stage = min(current_stage + 1, len(SRS_INTERVALS) - 1)
+        is_mastered = 1 if new_stage >= len(SRS_INTERVALS) - 2 else 0
+    else:
+        new_stage = max(0, current_stage - 1)
+        is_mastered = 0
+
+    days = SRS_INTERVALS[new_stage]
+    cursor.execute('''
+        UPDATE wrong_questions 
+        SET srs_stage = ?, 
+            next_review_time = datetime('now', ?),
+            last_review_time = CURRENT_TIMESTAMP,
+            review_count = review_count + 1,
+            is_mastered = ?
+        WHERE id = ?
+    ''', (new_stage, f'+{days} day', is_mastered, question_id))
+
+    return new_stage
+
 def is_reflection_required_for_user(user_id):
     normalized = user_id or 'default_user'
     bucket = int(hashlib.md5(normalized.encode('utf-8')).hexdigest()[:8], 16) % 100
@@ -213,6 +267,13 @@ def add_wrong_question():
     ))
     q_id = cursor.lastrowid
 
+    cursor.execute('''
+        UPDATE wrong_questions 
+        SET next_review_time = CURRENT_TIMESTAMP,
+            wrong_count = 1
+        WHERE id = ?
+    ''', (q_id,))
+
     # 2. Ontology Mapping: Map Question to Knowledge Points
     # In a real scenario, this could be LLM-generated. Here we use category/chapter as proxy if kps not provided.
     kps = data.get('knowledge_points', [])
@@ -284,44 +345,205 @@ def get_wrong_questions():
     conn.close()
     return jsonify({'items': questions, 'total': total, 'page': page, 'limit': limit})
 
-@app.route('/api/stats/overview', methods=['GET'])
-def get_stats_overview():
+@app.route('/api/wrong-questions/<int:question_id>', methods=['GET'])
+def get_wrong_question(question_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM wrong_questions WHERE id = ?', (question_id,))
+    row = cursor.fetchone()
+    conn.close()
+    if not row:
+        return jsonify({'error': 'Question not found'}), 404
+    return jsonify(_format_question(row))
+
+@app.route('/api/wrong-questions/<int:question_id>', methods=['PUT'])
+def update_wrong_question(question_id):
+    data = request.get_json()
     conn = get_db()
     cursor = conn.cursor()
 
-    cursor.execute('SELECT COUNT(*) FROM wrong_questions')
+    cursor.execute('SELECT id FROM wrong_questions WHERE id = ?', (question_id,))
+    if not cursor.fetchone():
+        conn.close()
+        return jsonify({'error': 'Question not found'}), 404
+
+    update_fields = []
+    params = []
+    allowed_fields = ['question', 'options', 'user_answer', 'correct_answer',
+                      'analysis', 'category', 'chapter', 'is_mastered', 'review_count']
+    for field in allowed_fields:
+        if field in data:
+            update_fields.append(f'{field} = ?')
+            if field == 'options':
+                params.append(json.dumps(data[field]))
+            elif field == 'is_mastered':
+                params.append(int(data[field]))
+            else:
+                params.append(data[field])
+
+    if update_fields:
+        params.append(question_id)
+        cursor.execute(f'UPDATE wrong_questions SET {", ".join(update_fields)}, last_review_time = CURRENT_TIMESTAMP WHERE id = ?', params)
+        conn.commit()
+
+    cursor.execute('SELECT * FROM wrong_questions WHERE id = ?', (question_id,))
+    row = cursor.fetchone()
+    conn.close()
+    return jsonify({'success': True, 'data': _format_question(row)})
+
+@app.route('/api/wrong-questions/<int:question_id>', methods=['DELETE'])
+def delete_wrong_question(question_id):
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('DELETE FROM wrong_questions WHERE id = ?', (question_id,))
+    cursor.execute('DELETE FROM question_mapping WHERE question_id = ?', (question_id,))
+    conn.commit()
+    conn.close()
+    return jsonify({'success': True})
+
+@app.route('/api/wrong-questions/batch/delete', methods=['POST'])
+def batch_delete_questions():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    if not ids:
+        return jsonify({'error': 'No ids provided'}), 400
+    conn = get_db()
+    cursor = conn.cursor()
+    placeholders = ','.join(['?'] * len(ids))
+    cursor.execute(f'DELETE FROM wrong_questions WHERE id IN ({placeholders})', ids)
+    cursor.execute(f'DELETE FROM question_mapping WHERE question_id IN ({placeholders})', ids)
+    conn.commit()
+    deleted = cursor.rowcount
+    conn.close()
+    return jsonify({'success': True, 'deleted': deleted})
+
+@app.route('/api/wrong-questions/batch/master', methods=['POST'])
+def batch_mark_mastered():
+    data = request.get_json()
+    ids = data.get('ids', [])
+    mastered = int(data.get('is_mastered', 1))
+    if not ids:
+        return jsonify({'error': 'No ids provided'}), 400
+    conn = get_db()
+    cursor = conn.cursor()
+    placeholders = ','.join(['?'] * len(ids))
+    cursor.execute(f'UPDATE wrong_questions SET is_mastered = ?, last_review_time = CURRENT_TIMESTAMP WHERE id IN ({placeholders})', [mastered] + ids)
+    conn.commit()
+    updated = cursor.rowcount
+    conn.close()
+    return jsonify({'success': True, 'updated': updated})
+
+@app.route('/api/wrong-questions/export/json', methods=['GET'])
+def export_questions_json():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM wrong_questions WHERE user_id = ? ORDER BY id ASC', (user_id,))
+    rows = cursor.fetchall()
+    questions = [_format_question(row) for row in rows]
+    conn.close()
+
+    from flask import make_response
+    resp = make_response(json.dumps({'questions': questions}, ensure_ascii=False, indent=2))
+    resp.headers['Content-Type'] = 'application/json; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'attachment; filename="wrong_questions.json"'
+    return resp
+
+@app.route('/api/wrong-questions/export/csv', methods=['GET'])
+def export_questions_csv():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+    cursor.execute('SELECT * FROM wrong_questions WHERE user_id = ? ORDER BY id ASC', (user_id,))
+    rows = cursor.fetchall()
+    conn.close()
+
+    import csv
+    import io
+    from flask import make_response
+
+    output = io.StringIO()
+    writer = csv.writer(output)
+    writer.writerow(['ID', '题目', '选项', '你的答案', '正确答案', '解析', '分类', '章节', '是否掌握', '复习次数', '创建时间'])
+    for row in rows:
+        options = json.loads(row['options']) if row['options'] else []
+        writer.writerow([
+            row['id'],
+            row['question'],
+            ' | '.join(options),
+            row['user_answer'],
+            row['correct_answer'],
+            row['analysis'],
+            row['category'],
+            row['chapter'],
+            '是' if row['is_mastered'] else '否',
+            row['review_count'],
+            row['created_at']
+        ])
+
+    output.seek(0)
+    resp = make_response('\ufeff' + output.getvalue())
+    resp.headers['Content-Type'] = 'text/csv; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'attachment; filename="wrong_questions.csv"'
+    return resp
+
+@app.route('/api/stats/overview', methods=['GET'])
+def get_stats_overview():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user_id,))
     total_questions = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE is_mastered = 1')
+    cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND is_mastered = 1', (user_id,))
     mastered_count = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(DISTINCT category) FROM wrong_questions WHERE category != ""')
+    cursor.execute('SELECT COUNT(DISTINCT category) FROM wrong_questions WHERE category != "" AND user_id = ?', (user_id,))
     category_count = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM practice_attempts')
+    cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ?', (user_id,))
     practice_count = cursor.fetchone()[0]
 
-    cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE is_correct = 1')
+    cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ? AND is_correct = 1', (user_id,))
     correct_count = cursor.fetchone()[0]
 
     accuracy = round((correct_count / practice_count) * 100, 2) if practice_count > 0 else 0
 
+    cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ? AND DATE(attempted_at) = DATE("now")', (user_id,))
+    today_practiced = cursor.fetchone()[0]
+
+    cursor.execute('''
+        SELECT AVG(is_correct) FROM practice_attempts 
+        WHERE user_id = ? AND DATE(attempted_at) = DATE("now")
+    ''', (user_id,))
+    today_avg = cursor.fetchone()[0]
+    today_correct_rate = round(today_avg * 100, 2) if today_avg else 0
+
+    mastery_rate = round((mastered_count / total_questions) * 100, 2) if total_questions > 0 else 0
+
     cursor.execute('SELECT COUNT(*) FROM knowledge_points')
     kp_count = cursor.fetchone()[0]
 
-    cursor.execute('SELECT AVG(mastery_score) FROM user_cognition')
+    cursor.execute('SELECT AVG(mastery_score) FROM user_cognition WHERE user_id = ?', (user_id,))
     avg_mastery = cursor.fetchone()[0]
     avg_mastery = round(avg_mastery, 2) if avg_mastery else 0
 
     conn.close()
     return jsonify({
         'total_questions': total_questions,
+        'total_wrong_questions': total_questions,
         'mastered_count': mastered_count,
+        'total_mastered': mastered_count,
         'unmastered_count': total_questions - mastered_count,
+        'total_not_mastered': total_questions - mastered_count,
+        'mastery_rate': mastery_rate,
         'category_count': category_count,
         'practice_count': practice_count,
         'correct_count': correct_count,
         'accuracy': accuracy,
+        'today_practiced': today_practiced,
+        'today_correct_rate': today_correct_rate,
         'knowledge_point_count': kp_count,
         'avg_mastery_score': avg_mastery
     })
@@ -349,15 +571,120 @@ def get_stats_daily():
     for row in rows:
         total = row['total']
         correct = row['correct']
+        accuracy = round((correct / total) * 100, 2) if total > 0 else 0
         daily_data.append({
             'date': row['date'],
             'total': total,
             'correct': correct,
             'wrong': row['wrong'],
-            'accuracy': round((correct / total) * 100, 2) if total > 0 else 0
+            'accuracy': accuracy,
+            'practiced': total,
+            'correct_rate': accuracy
         })
     conn.close()
-    return jsonify({'daily': daily_data})
+    return jsonify({'daily': daily_data, 'daily_stats': daily_data})
+
+@app.route('/api/stats/category', methods=['GET'])
+def get_stats_category():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT 
+            category,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered
+        FROM wrong_questions
+        WHERE category != ""
+        AND user_id = ?
+        GROUP BY category
+        ORDER BY total DESC
+    ''', (user_id,))
+
+    rows = cursor.fetchall()
+    categories = []
+    for row in rows:
+        total = row['total']
+        mastered = row['mastered']
+        categories.append({
+            'name': row['category'],
+            'total': total,
+            'mastered': mastered,
+            'not_mastered': total - mastered,
+            'mastery_rate': round((mastered / total) * 100, 2) if total > 0 else 0
+        })
+    conn.close()
+    return jsonify({'categories': categories})
+
+@app.route('/api/stats/chapter', methods=['GET'])
+def get_stats_chapter():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT 
+            chapter,
+            category,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered
+        FROM wrong_questions
+        WHERE chapter != ""
+        AND user_id = ?
+        GROUP BY chapter, category
+        ORDER BY total DESC
+    ''', (user_id,))
+
+    rows = cursor.fetchall()
+    chapters = []
+    for row in rows:
+        total = row['total']
+        mastered = row['mastered']
+        chapters.append({
+            'name': row['chapter'],
+            'category': row['category'],
+            'total': total,
+            'mastered': mastered,
+            'mastery_rate': round((mastered / total) * 100, 2) if total > 0 else 0
+        })
+    conn.close()
+    return jsonify({'chapters': chapters})
+
+@app.route('/api/stats/weak-points', methods=['GET'])
+def get_stats_weak_points():
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT 
+            category,
+            COUNT(*) as total,
+            SUM(CASE WHEN is_mastered = 0 THEN 1 ELSE 0 END) as not_mastered
+        FROM wrong_questions
+        WHERE category != ""
+        AND user_id = ?
+        GROUP BY category
+        HAVING not_mastered > 0
+        ORDER BY not_mastered DESC
+        LIMIT 10
+    ''', (user_id,))
+
+    rows = cursor.fetchall()
+    weak_points = []
+    for row in rows:
+        total = row['total']
+        not_mastered = row['not_mastered']
+        weak_rate = round((not_mastered / total) * 100, 2) if total > 0 else 0
+        weak_points.append({
+            'name': row['category'],
+            'total': total,
+            'not_mastered': not_mastered,
+            'weak_rate': weak_rate
+        })
+    conn.close()
+    return jsonify({'weak_points': weak_points})
 
 @app.route('/api/stats/cognition', methods=['GET'])
 def get_cognition_stats():
@@ -412,8 +739,8 @@ def submit_practice():
     for m in mappings:
         update_cognition(cursor, m['kp_id'], is_correct, error_pattern_id, user_id)
 
-    # 3. Update the Question state for legacy support
-    cursor.execute('UPDATE wrong_questions SET is_mastered = ? WHERE id = ?', (1 if is_correct else 0, question_id))
+    # 3. Update SRS state (replaces legacy is_mastered toggle)
+    new_srs_stage = update_srs(cursor, question_id, is_correct)
 
     requires_reflection = (not is_correct) and is_reflection_required_for_user(user_id)
     completed = 1 if (is_correct or not requires_reflection) else 0
@@ -441,7 +768,9 @@ def submit_practice():
         'is_correct': is_correct,
         'correct_answer': row['correct_answer'],
         'attempt_id': attempt_id,
-        'requires_reflection': requires_reflection
+        'requires_reflection': requires_reflection,
+        'srs_stage': new_srs_stage,
+        'next_review_days': SRS_INTERVALS[new_srs_stage] if new_srs_stage is not None else 0
     })
 
 @app.route('/api/practice/reflection', methods=['POST'])
@@ -496,14 +825,59 @@ def submit_reflection():
     conn.close()
     return jsonify({'success': True, 'reflection_id': reflection_id})
 
+@app.route('/api/practice/random', methods=['GET'])
+def random_practice():
+    limit = request.args.get('limit', 10, type=int)
+    user_id = request.args.get('user_id', 'default_user')
+    mastered_filter = request.args.get('is_mastered', '')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    where_sql = 'user_id = ?'
+    params = [user_id]
+    if mastered_filter != '':
+        where_sql += ' AND is_mastered = ?'
+        params.append(int(mastered_filter))
+
+    cursor.execute(f'SELECT * FROM wrong_questions WHERE {where_sql} ORDER BY RANDOM() LIMIT ?', params + [limit])
+    rows = cursor.fetchall()
+    questions = [_format_question(row) for row in rows]
+    conn.close()
+    return jsonify({'questions': questions})
+
+@app.route('/api/practice/today', methods=['GET'])
+def today_practice():
+    limit = request.args.get('limit', 20, type=int)
+    user_id = request.args.get('user_id', 'default_user')
+    conn = get_db()
+    cursor = conn.cursor()
+
+    cursor.execute('''
+        SELECT * FROM wrong_questions
+        WHERE user_id = ?
+        AND is_mastered = 0
+        AND (next_review_time IS NULL OR next_review_time <= datetime('now'))
+        ORDER BY 
+            CASE WHEN next_review_time IS NULL THEN 0 ELSE 1 END,
+            next_review_time ASC,
+            srs_stage ASC,
+            created_at ASC
+        LIMIT ?
+    ''', (user_id, limit))
+
+    rows = cursor.fetchall()
+    questions = [_format_question(row) for row in rows]
+    conn.close()
+    return jsonify({'questions': questions})
+
 @app.route('/api/practice/recommend', methods=['GET'])
 def recommend_practice():
     """Cognition-driven recommendation: find questions testing the weakest points"""
     user_id = request.args.get('user_id', 'default_user')
+    limit = request.args.get('limit', 10, type=int)
     conn = get_db()
     cursor = conn.cursor()
     
-    # Find the top 5 weakest knowledge points
     cursor.execute('''
         SELECT kp_id FROM user_cognition 
         WHERE user_id = ?
@@ -512,31 +886,20 @@ def recommend_practice():
     weak_kps = [row['kp_id'] for row in cursor.fetchall()]
     
     if not weak_kps:
-        # Fallback to random if no cognition data yet
-        cursor.execute('SELECT * FROM wrong_questions WHERE user_id = ? ORDER BY RANDOM() LIMIT 10', (user_id,))
+        cursor.execute('SELECT * FROM wrong_questions WHERE user_id = ? ORDER BY RANDOM() LIMIT ?', (user_id, limit))
         rows = cursor.fetchall()
     else:
-        # Get questions that test these weak points
         placeholders = ','.join(['?'] * len(weak_kps))
         cursor.execute(f'''
             SELECT DISTINCT qw.* FROM wrong_questions qw
             JOIN question_mapping qm ON qw.id = qm.question_id
             WHERE qm.kp_id IN ({placeholders})
             AND qw.user_id = ?
-            ORDER BY RANDOM() LIMIT 10
-        ''', weak_kps + [user_id])
+            ORDER BY RANDOM() LIMIT ?
+        ''', weak_kps + [user_id, limit])
         rows = cursor.fetchall()
 
-    questions = []
-    for row in rows:
-        questions.append({
-            'id': row['id'],
-            'question': row['question'],
-            'options': json.loads(row['options']) if row['options'] else [],
-            'correct_answer': row['correct_answer'],
-            'analysis': row['analysis'],
-            'category': row['category']
-        })
+    questions = [_format_question(row) for row in rows]
     conn.close()
     return jsonify({'questions': questions})
 
