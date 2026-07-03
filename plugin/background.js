@@ -30,6 +30,13 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
                 return;
             }
             console.log('采集结果:', response);
+            if (response && response.success && response.data) {
+                fetch(API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(response.data)
+                }).catch(e => console.error('右键菜单发送失败:', e));
+            }
         });
     } else if (info.menuItemId === 'collectAllWrong') {
         chrome.tabs.sendMessage(tab.id, {action: 'collectAllWrongQuestions'}, function(response) {
@@ -66,6 +73,13 @@ chrome.commands.onCommand.addListener(function(command) {
                     return;
                 }
                 console.log('快捷键采集结果:', response);
+                if (response && response.success && response.data) {
+                    fetch(API_URL, {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json' },
+                        body: JSON.stringify(response.data)
+                    }).catch(e => console.error('快捷键发送失败:', e));
+                }
             });
         });
     }

@@ -16,8 +16,22 @@ document.getElementById('collect').addEventListener('click', function() {
                 }
 
                 if (response) {
-                    if (response.success) {
-                        showStatus('采集成功！', 'success');
+                    if (response.success && response.data) {
+                        showStatus('采集成功，正在发送到服务器...', 'info');
+                        chrome.runtime.sendMessage({
+                            action: 'sendToBackend',
+                            data: response.data
+                        }, function(backendResponse) {
+                            if (chrome.runtime.lastError) {
+                                showStatus('发送失败：' + chrome.runtime.lastError.message, 'error');
+                                return;
+                            }
+                            if (backendResponse && backendResponse.success) {
+                                showStatus('采集并发送成功！', 'success');
+                            } else {
+                                showStatus('发送失败：' + (backendResponse ? backendResponse.error : '未知错误'), 'error');
+                            }
+                        });
                     } else {
                         showStatus('采集失败：' + (response.error || '未知错误'), 'error');
                     }
@@ -33,7 +47,7 @@ document.getElementById('collect').addEventListener('click', function() {
 });
 
 document.getElementById('collectAll').addEventListener('click', function() {
-    showStatus('正在采集所有错题...', 'info');
+    showStatus('正在采集所有错题，请稍候...', 'info');
 
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
         if (!tabs || tabs.length === 0) {
@@ -51,7 +65,10 @@ document.getElementById('collectAll').addEventListener('click', function() {
 
                 if (response) {
                     if (response.success) {
-                        showStatus('采集所有错题成功！', 'success');
+                        const total = response.total || response.data ? response.data.length : '若干';
+                        const successCount = response.successCount || total;
+                        const failCount = response.failCount || 0;
+                        showStatus(`采集完成：成功 ${successCount} 道，失败 ${failCount} 道`, 'success');
                     } else {
                         showStatus('采集失败：' + (response.error || '未知错误'), 'error');
                     }
