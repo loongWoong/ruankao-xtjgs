@@ -12,6 +12,7 @@ function Dashboard() {
   });
   const [cognitionMap, setCognitionMap] = useState([]);
   const [dailyStats, setDailyStats] = useState([]);
+  const [categoryStats, setCategoryStats] = useState([]);
   const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
   const [loading, setLoading] = useState(true);
 
@@ -27,21 +28,24 @@ function Dashboard() {
   const fetchData = async () => {
     try {
       const userId = getUserId();
-      const [statsRes, cognitionRes, dailyRes, conversionRes] = await Promise.all([
+      const [statsRes, cognitionRes, dailyRes, categoryRes, conversionRes] = await Promise.all([
         fetch(`http://localhost:5002/api/stats/overview?user_id=${encodeURIComponent(userId)}`),
         fetch(`http://localhost:5002/api/stats/cognition?user_id=${encodeURIComponent(userId)}`),
         fetch(`http://localhost:5002/api/stats/daily?days=7&user_id=${encodeURIComponent(userId)}`),
+        fetch(`http://localhost:5002/api/stats/category?user_id=${encodeURIComponent(userId)}`),
         fetch('http://localhost:5002/api/metrics/repractice-conversion?days=7&hours=72')
       ]);
 
       const statsData = await statsRes.json();
       const cognitionData = await cognitionRes.json();
       const dailyData = await dailyRes.json();
+      const categoryData = await categoryRes.json();
       const conversionData = await conversionRes.json();
 
       setStats(statsData);
       setCognitionMap(cognitionData.cognition_map || []);
       setDailyStats(dailyData.daily_stats || dailyData.daily || []);
+      setCategoryStats(categoryData.categories || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
     } catch (error) {
       console.error('获取数据失败:', error);
@@ -87,6 +91,118 @@ function Dashboard() {
           <div className="stat-card-title">72h 二练转化</div>
           <div className="stat-card-value" style={{ color: '#2196f3' }}>{conversion.conversion_rate}%</div>
           <div className="stat-card-sub">{conversion.numerator_users}/{conversion.denominator_users} 用户</div>
+        </div>
+      </div>
+
+      <div className="dashboard-grid" style={{ gridTemplateColumns: '1fr 1fr' }}>
+        <div className="section-card">
+          <h2 className="section-title">分类分布</h2>
+          <div style={{ display: 'flex', gap: '1.5rem', alignItems: 'center', marginTop: '1rem' }}>
+            {categoryStats.length > 0 ? (
+              <>
+                <div className="donut-chart">
+                  <svg viewBox="0 0 42 42" className="donut-svg">
+                    {(() => {
+                    const total = categoryStats.reduce((s, c) => s + c.total, 0);
+                    let offset = 0;
+                    const colors = ['#667eea', '#764ba2', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#9c27b0'];
+                    return categoryStats.slice(0, 7).map((cat, i) => {
+                      const percent = (cat.total / total) * 100;
+                      const dashArray = `${percent} ${100 - percent}`;
+                      const dashOffset = -offset;
+                      const color = colors[i % colors.length];
+                      offset += percent;
+                      return (
+                        <circle
+                          key={i}
+                          cx="21"
+                          cy="21"
+                          r="15.9155"
+                          fill="transparent"
+                          stroke={color}
+                          strokeWidth="6"
+                          strokeDasharray={dashArray}
+                          strokeDashoffset={dashOffset}
+                          transform="rotate(-90 21 21)"
+                        />
+                      );
+                    });
+                  })()}
+                  </svg>
+                  <div className="donut-center">
+                    <div className="donut-value">{stats.total_wrong_questions}</div>
+                    <div className="donut-label">总题数</div>
+                  </div>
+                </div>
+                <div style={{ flex: 1, display: 'flex', flexDirection: 'column', gap: '0.5rem' }}>
+                  {categoryStats.slice(0, 7).map((cat, i) => {
+                    const colors = ['#667eea', '#764ba2', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#9c27b0'];
+                    return (
+                      <div key={i} style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', fontSize: '0.875rem' }}>
+                        <div style={{ width: 10, height: 10, borderRadius: '50%', background: colors[i % colors.length], flexShrink: 0 }} />
+                        <span style={{ flex: 1, color: '#666', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>{cat.name}</span>
+                        <span style={{ fontWeight: 600, color: '#333' }}>{cat.total}</span>
+                      </div>
+                    );
+                  })}
+                </div>
+              </>
+            ) : (
+              <div className="empty-state" style={{ flex: 1 }}>
+                <p>暂无分类数据</p>
+              </div>
+            )}
+          </div>
+        </div>
+
+        <div className="section-card">
+          <h2 className="section-title">掌握度进度</h2>
+          <div style={{ display: 'flex', justifyContent: 'center', marginTop: '1rem' }}>
+            <div className="progress-ring-container">
+              <svg className="progress-ring" width="160" height="160">
+                <circle
+                  stroke="#e0e0e0"
+                  strokeWidth="10"
+                  fill="transparent"
+                  r="70"
+                  cx="80"
+                  cy="80"
+                />
+                <circle
+                  stroke="url(#masteryGradient)"
+                  strokeWidth="10"
+                  fill="transparent"
+                  r="70"
+                  cx="80"
+                  cy="80"
+                  strokeDasharray={`${stats.mastery_rate * 4.398} 439.8`}
+                  strokeDashoffset="0"
+                  transform="rotate(-90 80 80)"
+                  strokeLinecap="round"
+                />
+                <defs>
+                  <linearGradient id="masteryGradient" x1="0%" y1="0%" x2="100%" y2="0%">
+                    <stop offset="0%" stopColor="#667eea" />
+                    <stop offset="100%" stopColor="#764ba2" />
+                  </linearGradient>
+                </defs>
+              </svg>
+              <div className="progress-ring-text">
+                <div className="progress-ring-value">{stats.mastery_rate}%</div>
+                <div className="progress-ring-label">总体掌握率</div>
+              </div>
+            </div>
+          </div>
+          <div style={{ display: 'flex', justifyContent: 'space-around', marginTop: '1rem', fontSize: '0.875rem' }}>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#4caf50' }}>{stats.total_mastered}</div>
+              <div style={{ color: '#888' }}>已掌握</div>
+            </div>
+            <div style={{ textAlign: 'center' }}>
+              <div style={{ fontSize: '1.5rem', fontWeight: 600, color: '#f44336' }}>{stats.total_not_mastered}</div>
+              <div style={{ color: '#888' }}>未掌握</div>
+            </div>
+          </div>
         </div>
       </div>
 

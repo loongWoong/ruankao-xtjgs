@@ -297,51 +297,54 @@ def add_wrong_question():
 
 @app.route('/api/wrong-questions', methods=['GET'])
 def get_wrong_questions():
-    # Keep original functionality but allow sorting by cognition gaps
     page = request.args.get('page', 1, type=int)
     limit = request.args.get('limit', 20, type=int)
     category = request.args.get('category', '')
+    chapter = request.args.get('chapter', '')
     is_mastered = request.args.get('is_mastered', '')
     search = request.args.get('search', '')
+    user_id = request.args.get('user_id', 'default_user')
+    sort_by = request.args.get('sort_by', 'created_at')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    valid_sort_fields = ['created_at', 'review_count', 'srs_stage', 'next_review_time']
+    if sort_by not in valid_sort_fields:
+        sort_by = 'created_at'
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
 
     conn = get_db()
     cursor = conn.cursor()
-    where_clauses = []
-    params = []
+    where_clauses = ['user_id = ?']
+    params = [user_id]
 
     if category:
         where_clauses.append('category = ?')
         params.append(category)
+    if chapter:
+        where_clauses.append('chapter = ?')
+        params.append(chapter)
     if is_mastered != '':
         where_clauses.append('is_mastered = ?')
         params.append(int(is_mastered))
     if search:
-        where_clauses.append('(question LIKE ? OR analysis LIKE ?)')
-        params.append(f'%{search}%')
-        params.append(f'%{search}%')
+        where_clauses.append('(question LIKE ? OR analysis LIKE ? OR options LIKE ? OR category LIKE ? OR chapter LIKE ?)')
+        like_pattern = f'%{search}%'
+        params.extend([like_pattern, like_pattern, like_pattern, like_pattern, like_pattern])
 
-    where_sql = ' AND '.join(where_clauses) if where_clauses else '1=1'
+    where_sql = ' AND '.join(where_clauses)
     cursor.execute(f'SELECT COUNT(*) FROM wrong_questions WHERE {where_sql}', params)
     total = cursor.fetchone()[0]
 
     offset = (page - 1) * limit
-    cursor.execute(f'SELECT * FROM wrong_questions WHERE {where_sql} ORDER BY created_at DESC LIMIT ? OFFSET ?', params + [limit, offset])
+    cursor.execute(f'''
+        SELECT * FROM wrong_questions 
+        WHERE {where_sql} 
+        ORDER BY {sort_by} {sort_order}
+        LIMIT ? OFFSET ?
+    ''', params + [limit, offset])
     
-    questions = []
-    for row in cursor.fetchall():
-        questions.append({
-            'id': row['id'],
-            'question_id': row['question_id'],
-            'question': row['question'],
-            'options': json.loads(row['options']) if row['options'] else [],
-            'user_answer': row['user_answer'],
-            'correct_answer': row['correct_answer'],
-            'analysis': row['analysis'],
-            'category': row['category'],
-            'chapter': row['chapter'],
-            'is_mastered': bool(row['is_mastered']),
-            'created_at': row['created_at']
-        })
+    questions = [_format_question(row) for row in cursor.fetchall()]
     conn.close()
     return jsonify({'items': questions, 'total': total, 'page': page, 'limit': limit})
 

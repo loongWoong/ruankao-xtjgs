@@ -5,31 +5,86 @@
     <title>软考达人做题记录采集</title>
     <style>
         body {
-            width: 300px;
-            padding: 10px;
-            font-family: Arial, sans-serif;
+            width: 320px;
+            padding: 12px;
+            font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+            margin: 0;
+            background: #f5f7fa;
         }
         h1 {
             font-size: 16px;
-            margin-bottom: 10px;
+            margin: 0 0 12px 0;
+            color: #333;
+            display: flex;
+            align-items: center;
+            gap: 8px;
+        }
+        h1::before {
+            content: '📚';
+            font-size: 18px;
+        }
+        .stats-card {
+            background: white;
+            border-radius: 8px;
+            padding: 10px 12px;
+            margin-bottom: 12px;
+            display: grid;
+            grid-template-columns: 1fr 1fr 1fr;
+            gap: 8px;
+            box-shadow: 0 1px 3px rgba(0,0,0,0.08);
+        }
+        .stat-item {
+            text-align: center;
+        }
+        .stat-value {
+            font-size: 18px;
+            font-weight: 700;
+            color: #667eea;
+        }
+        .stat-label {
+            font-size: 11px;
+            color: #888;
+            margin-top: 2px;
         }
         button {
             width: 100%;
-            padding: 8px;
-            margin: 5px 0;
-            background-color: #4CAF50;
+            padding: 10px;
+            margin: 6px 0;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
             color: white;
             border: none;
-            border-radius: 4px;
+            border-radius: 6px;
             cursor: pointer;
+            font-size: 14px;
+            font-weight: 500;
+            transition: all 0.2s;
         }
         button:hover {
-            background-color: #45a049;
+            transform: translateY(-1px);
+            box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
+        }
+        button.secondary {
+            background: #f0f0f0;
+            color: #333;
+        }
+        button.secondary:hover {
+            background: #e0e0e0;
+            box-shadow: none;
+        }
+        button.ghost {
+            background: transparent;
+            color: #667eea;
+            border: 1px solid #667eea;
+        }
+        button.ghost:hover {
+            background: rgba(102, 126, 234, 0.08);
+            box-shadow: none;
         }
         #status {
             margin-top: 10px;
-            padding: 5px;
-            border-radius: 4px;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 13px;
         }
         .success {
             background-color: #d4edda;
@@ -39,13 +94,57 @@
             background-color: #f8d7da;
             color: #721c24;
         }
+        .info {
+            background-color: #d1ecf1;
+            color: #0c5460;
+        }
+        .divider {
+            height: 1px;
+            background: #e8e8e8;
+            margin: 10px 0;
+        }
+        .footer-link {
+            text-align: center;
+            margin-top: 8px;
+        }
+        .footer-link a {
+            color: #667eea;
+            text-decoration: none;
+            font-size: 12px;
+            cursor: pointer;
+        }
+        .footer-link a:hover {
+            text-decoration: underline;
+        }
     </style>
 </head>
 <body>
-    <h1>软考达人做题记录采集</h1>
-    <button id="collect">采集当前题目</button>
-    <button id="collectAll">采集所有错题</button>
+    <h1>软考错题采集</h1>
+
+    <div class="stats-card">
+        <div class="stat-item">
+            <div class="stat-value" id="statTotal">--</div>
+            <div class="stat-label">总错题</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="statMastered" style="color: #4caf50;">--</div>
+            <div class="stat-label">已掌握</div>
+        </div>
+        <div class="stat-item">
+            <div class="stat-value" id="statToday" style="color: #ff9800;">--</div>
+            <div class="stat-label">今日练</div>
+        </div>
+    </div>
+
+    <button id="collect">📝 采集当前题目</button>
+    <button id="collectAll">📋 采集所有错题</button>
+
     <div id="status"></div>
+
+    <div class="divider"></div>
+
+    <button id="openDashboard" class="ghost">📊 打开错题管理系统</button>
+
     <script src="popup.js"></script>
 </body>
 </html>

@@ -1,3 +1,35 @@
+const API_BASE = 'http://localhost:5002';
+
+document.addEventListener('DOMContentLoaded', function() {
+    loadStats();
+});
+
+function loadStats() {
+    try {
+        fetch(`${API_BASE}/api/stats/overview`)
+            .then(res => res.json())
+            .then(data => {
+                if (data) {
+                    document.getElementById('statTotal').textContent = data.total_wrong_questions || data.total_questions || 0;
+                    document.getElementById('statMastered').textContent = data.total_mastered || data.mastered_count || 0;
+                    document.getElementById('statToday').textContent = data.today_practiced || 0;
+                }
+            })
+            .catch(err => {
+                console.log('加载统计失败:', err);
+                document.getElementById('statTotal').textContent = '0';
+                document.getElementById('statMastered').textContent = '0';
+                document.getElementById('statToday').textContent = '0';
+            });
+    } catch (e) {
+        console.log('统计加载异常:', e);
+    }
+}
+
+document.getElementById('openDashboard').addEventListener('click', function() {
+    chrome.tabs.create({ url: 'http://localhost:5173' });
+});
+
 document.getElementById('collect').addEventListener('click', function() {
     showStatus('正在采集...', 'info');
 
@@ -27,7 +59,8 @@ document.getElementById('collect').addEventListener('click', function() {
                                 return;
                             }
                             if (backendResponse && backendResponse.success) {
-                                showStatus('采集并发送成功！', 'success');
+                                showStatus('✓ 采集并发送成功！', 'success');
+                                loadStats();
                             } else {
                                 showStatus('发送失败：' + (backendResponse ? backendResponse.error : '未知错误'), 'error');
                             }
@@ -65,10 +98,11 @@ document.getElementById('collectAll').addEventListener('click', function() {
 
                 if (response) {
                     if (response.success) {
-                        const total = response.total || response.data ? response.data.length : '若干';
+                        const total = response.total || (response.data ? response.data.length : 0);
                         const successCount = response.successCount || total;
                         const failCount = response.failCount || 0;
-                        showStatus(`采集完成：成功 ${successCount} 道，失败 ${failCount} 道`, 'success');
+                        showStatus(`✓ 完成：成功 ${successCount} 道，失败 ${failCount} 道`, 'success');
+                        loadStats();
                     } else {
                         showStatus('采集失败：' + (response.error || '未知错误'), 'error');
                     }
@@ -92,6 +126,6 @@ function showStatus(message, type) {
         setTimeout(function() {
             statusDiv.textContent = '';
             statusDiv.className = '';
-        }, 3000);
+        }, 4000);
     }
 }
