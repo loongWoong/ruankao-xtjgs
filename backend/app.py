@@ -2682,21 +2682,26 @@ def random_practice():
 def today_practice():
     limit = request.args.get('limit', 20, type=int)
     user_id = get_user_id()
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    today_end = now + ' 23:59:59'
     with get_db_conn() as conn:
         cursor = conn.cursor()
-
+        # 与复习队列一致的优先级：逾期(srs>0且过期) > 今日到期 > 新错题(srs=0)
         cursor.execute('''
-            SELECT * FROM wrong_questions
+            SELECT *,
+                   CASE
+                       WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1
+                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
+                       WHEN srs_stage = 0 OR next_review_time IS NULL THEN 3
+                       ELSE 4
+                   END as priority
+            FROM wrong_questions
             WHERE user_id = ?
             AND is_mastered = 0
-            AND (next_review_time IS NULL OR next_review_time <= datetime('now'))
-            ORDER BY 
-                CASE WHEN next_review_time IS NULL THEN 0 ELSE 1 END,
-                next_review_time ASC,
-                srs_stage ASC,
-                created_at ASC
+            AND (next_review_time IS NULL OR next_review_time <= ? OR srs_stage = 0)
+            ORDER BY priority ASC, next_review_time ASC, wrong_count DESC, created_at ASC
             LIMIT ?
-        ''', (user_id, limit))
+        ''', (now, today_end, user_id, today_end, limit))
 
         rows = cursor.fetchall()
         questions = [_format_question(row) for row in rows]
@@ -5921,34 +5926,36 @@ def get_review_queue():
 
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        # 优先级：逾期 > 今日到期 > 未开始SRS；同优先级按next_review_time升序
+        # 优先级：逾期(srs_stage>0且过期) > 今日到期 > 新错题(srs_stage=0) > 未到期
+        # srs_stage=0 视为"新错题"，即使 next_review_time 过期也不算逾期
+        today_end = now + ' 23:59:59'
         cursor.execute('''
             SELECT id, question, category, chapter, srs_stage, next_review_time,
                    wrong_count, last_review_time,
                    CASE
-                       WHEN next_review_time IS NULL THEN 3
-                       WHEN next_review_time < ? THEN 1
-                       WHEN next_review_time <= ? THEN 2
+                       WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1
+                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
+                       WHEN srs_stage = 0 OR next_review_time IS NULL THEN 3
                        ELSE 4
                    END as priority
             FROM wrong_questions
             WHERE user_id = ? AND is_mastered = 0
-            AND (next_review_time IS NULL OR next_review_time <= ?)
+            AND (next_review_time IS NULL OR next_review_time <= ? OR srs_stage = 0)
             ORDER BY priority ASC, next_review_time ASC, wrong_count DESC
             LIMIT ?
-        ''', (now, now + ' 23:59:59', user_id, now + ' 23:59:59', limit))
+        ''', (now, today_end, user_id, today_end, limit))
         items = [dict(row) for row in cursor.fetchall()]
 
-        # 统计到期情况
+        # 统计：新错题/逾期/今日到期，区分 srs_stage
         cursor.execute('''
             SELECT
-                SUM(CASE WHEN next_review_time IS NULL THEN 1 ELSE 0 END) as new_count,
-                SUM(CASE WHEN next_review_time < ? THEN 1 ELSE 0 END) as overdue_count,
-                SUM(CASE WHEN next_review_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as today_count,
+                SUM(CASE WHEN srs_stage = 0 OR next_review_time IS NULL THEN 1 ELSE 0 END) as new_count,
+                SUM(CASE WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1 ELSE 0 END) as overdue_count,
+                SUM(CASE WHEN next_review_time IS NOT NULL AND next_review_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as today_count,
                 COUNT(*) as total_pending
             FROM wrong_questions
             WHERE user_id = ? AND is_mastered = 0
-        ''', (now, now, now + ' 23:59:59', user_id))
+        ''', (now, now, today_end, user_id))
         stats = dict(cursor.fetchone())
 
     return jsonify({
@@ -5960,6 +5967,59 @@ def get_review_queue():
             'total_pending': stats['total_pending'] or 0
         },
         'returned': len(items)
+    })
+
+
+@app.route('/api/review/submit', methods=['POST'])
+@api_response
+def submit_review():
+    """提交单题复习结果，推进 SRS 阶段。
+    请求体: { question_id: int, is_correct: bool, time_spent?: int }
+    """
+    data = request.get_json(silent=True) or {}
+    question_id = data.get('question_id')
+    is_correct = bool(data.get('is_correct'))
+    time_spent = safe_int(data.get('time_spent', 0), 0)
+    user_id = get_user_id()
+
+    if not question_id:
+        return jsonify({'error': 'question_id 必填'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id, correct_answer, created_at FROM wrong_questions WHERE id = ? AND user_id = ?',
+                       (question_id, user_id))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': '错题不存在'}), 404
+
+        # 更新知识点认知度
+        cursor.execute('SELECT kp_id FROM question_mapping WHERE question_id = ?', (question_id,))
+        for m in cursor.fetchall():
+            update_cognition(cursor, m['kp_id'], is_correct, None, user_id)
+
+        # 推进 SRS
+        new_stage = update_srs(cursor, question_id, is_correct)
+
+        # 记录练习 attempt（复用 practice_attempts 表）
+        cursor.execute('''
+            INSERT INTO practice_attempts (
+                user_id, question_id, selected_answer, is_correct, error_pattern_id,
+                time_spent, first_wrong_at, completed
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, 1)
+        ''', (user_id, question_id, row['correct_answer'] if is_correct else '', 1 if is_correct else 0,
+              time_spent, row['created_at']))
+        attempt_id = cursor.lastrowid
+        conn.commit()
+
+    next_days = SRS_INTERVALS[new_stage] if new_stage is not None else 0
+    return jsonify({
+        'question_id': question_id,
+        'is_correct': is_correct,
+        'srs_stage': new_stage,
+        'next_review_days': next_days,
+        'is_mastered': new_stage is not None and new_stage >= len(SRS_INTERVALS) - 2,
+        'attempt_id': attempt_id
     })
 
 

@@ -1,7 +1,10 @@
 import React, { useState, useEffect } from 'react';
+import { useSearchParams } from 'react-router-dom';
 
 function Practice() {
-  const [mode, setMode] = useState('today');
+  const [searchParams] = useSearchParams();
+  const initialMode = searchParams.get('mode') || 'today';
+  const [mode, setMode] = useState(['today', 'recommend', 'random'].includes(initialMode) ? initialMode : 'today');
   const [userId, setUserId] = useState('');
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);

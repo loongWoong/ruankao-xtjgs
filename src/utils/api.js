@@ -587,6 +587,14 @@ export const getReviewUpcoming = (days = 7) => {
   return fetchAPI(`/api/review/upcoming?days=${days}`);
 };
 
+export const submitReview = (questionId, isCorrect, timeSpent = 0) => {
+  return fetchAPI('/api/review/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_id: questionId, is_correct: isCorrect, time_spent: timeSpent })
+  });
+};
+
 // ==================== 能力雷达图 ====================
 
 export const getAbilityRadar = () => {

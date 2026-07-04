@@ -95,6 +95,31 @@ function ReviewQueue() {
         </div>
       </div>
 
+      {todayLoad > 0 && (
+        <div className="section-card" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff', border: 'none', marginBottom: '1rem' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', flexWrap: 'wrap', gap: '1rem' }}>
+            <div>
+              <div style={{ fontSize: '1.1rem', fontWeight: 600 }}>🎯 今日有 {todayLoad} 道错题待复习</div>
+              <div style={{ fontSize: '0.875rem', opacity: 0.9, marginTop: '0.25rem' }}>立即开始复习，推进 SRS 间隔递进，巩固长期记忆</div>
+            </div>
+            <Link
+              to="/practice?mode=today"
+              className="btn"
+              style={{
+                background: '#fff',
+                color: '#667eea',
+                fontWeight: 600,
+                padding: '0.6rem 1.5rem',
+                textDecoration: 'none',
+                borderRadius: '8px'
+              }}
+            >
+              ▶ 开始今日复习
+            </Link>
+          </div>
+        </div>
+      )}
+
       <div className="section-card">
         <h3 className="section-title">
           <span>📋</span>复习队列
