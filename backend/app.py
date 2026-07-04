@@ -1960,9 +1960,12 @@ def _format_question(row):
         'chapter': row['chapter'],
         'is_mastered': bool(row['is_mastered']),
         'review_count': row['review_count'],
+        'correct_count': row['correct_count'] if 'correct_count' in row.keys() else 0,
+        'wrong_count': row['wrong_count'] if 'wrong_count' in row.keys() else 0,
         'last_review_time': row['last_review_time'],
         'srs_stage': row['srs_stage'] if 'srs_stage' in row.keys() else 0,
         'next_review_time': row['next_review_time'] if 'next_review_time' in row.keys() else None,
+        'source_url': row['source_url'] if 'source_url' in row.keys() else None,
         'created_at': row['created_at']
     }
 
@@ -6564,6 +6567,193 @@ def export_learning_report():
     resp.headers['Content-Type'] = 'text/markdown; charset=utf-8'
     resp.headers['Content-Disposition'] = 'attachment; filename="learning_report.md"'
     return resp
+
+
+@app.route('/api/wrong-questions/auto-classify', methods=['POST'])
+@api_response
+def auto_classify_wrong_questions():
+    """自动补全错题分类/章节并建立知识点关联。
+    基于题目内容关键词匹配知识点，反推 category（顶层章节）和 chapter（直接父章节）。
+    可选参数：question_ids（list，指定题号；为空则处理所有未分类错题）
+    """
+    user_id = get_user_id()
+    body = request.get_json(silent=True) or {}
+    question_ids = body.get('question_ids') or []
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 1. 加载所有知识点（含父子关系），构建关键词索引
+        cursor.execute('SELECT id, name, parent_id, category, chapter FROM knowledge_points')
+        all_kps = [dict(r) for r in cursor.fetchall()]
+        kp_by_id = {kp['id']: kp for kp in all_kps}
+
+        # 构建知识点名 -> kp 的映射（按名称长度降序，优先匹配更具体的）
+        kp_name_list = sorted(all_kps, key=lambda x: -len(x['name'] or ''))
+
+        # 区分叶子节点（无子节点）和层级节点，匹配时优先叶子节点（更具体）
+        parent_ids = {kp['parent_id'] for kp in all_kps if kp['parent_id'] is not None}
+        leaf_kps = [kp for kp in all_kps if kp['id'] not in parent_ids and kp['parent_id'] is not None]
+        leaf_kps_sorted = sorted(leaf_kps, key=lambda x: -len(x['name'] or ''))
+
+        # 通用词停用词表（避免误匹配）
+        STOPWORDS = {'系统', '设计', '管理', '概述', '基础', '应用', '技术', '原理', '结构', '方法', '分析', '实现', '概念', '基本', '关系', '模型', '语言', '步骤', '理论', '组成', '分类', '层次', '类型', '特性', '要求', '模式', '三级', '两级', '映射', '一级', '二级'}
+
+        import re as _re
+        def extract_keywords(name):
+            """从知识点名提取候选关键词：去编号前缀 + 滑窗生成2-3字子串"""
+            if not name:
+                return []
+            # 去除前导编号如 "1.2 "、"第1章 "、"5.2 "
+            cleaned = _re.sub(r'^(第\d+[章节]\s*)?(\d+[\.\-]\d*\s*)+', '', name)
+            # 按非字母数字汉字字符拆分
+            parts = _re.split(r'[\s/、，,（）()【】\[\]:：；;]+', cleaned)
+            keywords = []
+            for p in parts:
+                p = p.strip()
+                if not p:
+                    continue
+                # 英文/数字整体保留
+                if _re.fullmatch(r'[A-Za-z0-9\-\.]+', p):
+                    if len(p) >= 2 and p not in STOPWORDS:
+                        keywords.append(p)
+                    continue
+                # 中文：生成2字前缀/后缀子串（避免中间噪声词）
+                if len(p) >= 2:
+                    # 整词优先
+                    if p not in STOPWORDS:
+                        keywords.append(p)
+                    # 前2/后2 子串（3字子串噪声大，弃用）
+                    if len(p) > 2:
+                        prefix = p[:2]
+                        suffix = p[-2:]
+                        if prefix not in STOPWORDS and prefix not in keywords:
+                            keywords.append(prefix)
+                        if suffix not in STOPWORDS and suffix not in keywords:
+                            keywords.append(suffix)
+            return keywords
+
+        def match_kp_for_text(text, kp_list):
+            """在文本中匹配知识点：先全名子串，再关键词拆分"""
+            for kp in kp_list:
+                name = kp['name'] or ''
+                if not name or len(name) < 2:
+                    continue
+                # 1. 全名子串匹配（最精确）
+                if name in text:
+                    return kp
+            # 2. 关键词拆分匹配（更宽松）
+            for kp in kp_list:
+                name = kp['name'] or ''
+                if not name or len(name) < 2:
+                    continue
+                kws = extract_keywords(name)
+                for kw in kws:
+                    if len(kw) >= 2 and kw in text:
+                        return kp
+            return None
+
+        def match_kp_smart(text):
+            """智能匹配：先叶子节点，再回退到全部"""
+            r = match_kp_for_text(text, leaf_kps_sorted)
+            if r:
+                return r
+            return match_kp_for_text(text, kp_name_list)
+
+        def find_top_ancestor(kp_id):
+            """向上找到顶层章节（parent_id IS NULL）"""
+            cur = kp_by_id.get(kp_id)
+            while cur and cur['parent_id'] is not None:
+                parent = kp_by_id.get(cur['parent_id'])
+                if not parent:
+                    break
+                cur = parent
+            return cur
+
+        def find_direct_parent_name(kp_id):
+            """返回直接父知识点名"""
+            cur = kp_by_id.get(kp_id)
+            if cur and cur['parent_id'] is not None:
+                parent = kp_by_id.get(cur['parent_id'])
+                if parent:
+                    return parent['name']
+            return None
+
+        # 2. 选取待补全的错题
+        if question_ids:
+            placeholders = ','.join('?' * len(question_ids))
+            cursor.execute(
+                f'SELECT * FROM wrong_questions WHERE user_id = ? AND id IN ({placeholders})',
+                (user_id, *question_ids)
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM wrong_questions WHERE user_id = ? AND (category IS NULL OR category = "" OR chapter IS NULL OR chapter = "")',
+                (user_id,)
+            )
+        questions = [dict(r) for r in cursor.fetchall()]
+
+        updated = 0
+        mappings_created = 0
+        details = []
+
+        for q in questions:
+            text = (q['question'] or '') + ' ' + (q['analysis'] or '')
+            matched_kp = match_kp_smart(text)
+
+            new_category = q['category']
+            new_chapter = q['chapter']
+            kp_linked = None
+
+            if matched_kp:
+                # 反推顶层章节作为 category
+                top = find_top_ancestor(matched_kp['id'])
+                if top and top['name']:
+                    new_category = top['name']
+                # 匹配到的知识点自身作为 chapter（最具体的归属）
+                if matched_kp['parent_id'] is not None:
+                    new_chapter = matched_kp['name']
+                else:
+                    # 若匹配到的就是顶层章节，chapter 取其名
+                    new_chapter = matched_kp['name']
+                kp_linked = matched_kp
+
+            # 更新分类/章节
+            if new_category != q['category'] or new_chapter != q['chapter']:
+                cursor.execute(
+                    'UPDATE wrong_questions SET category = ?, chapter = ? WHERE id = ?',
+                    (new_category, new_chapter, q['id'])
+                )
+                updated += 1
+
+            # 建立 question_mapping
+            if kp_linked:
+                cursor.execute(
+                    'SELECT id FROM question_mapping WHERE question_id = ? AND kp_id = ?',
+                    (q['id'], kp_linked['id'])
+                )
+                if not cursor.fetchone():
+                    cursor.execute(
+                        'INSERT INTO question_mapping (question_id, kp_id) VALUES (?, ?)',
+                        (q['id'], kp_linked['id'])
+                    )
+                    mappings_created += 1
+
+            details.append({
+                'id': q['id'],
+                'matched_kp': kp_linked['name'] if kp_linked else None,
+                'category': new_category,
+                'chapter': new_chapter
+            })
+
+        conn.commit()
+
+    return jsonify({
+        'total': len(questions),
+        'updated': updated,
+        'mappings_created': mappings_created,
+        'details': details
+    })
 
 
 if __name__ == '__main__':

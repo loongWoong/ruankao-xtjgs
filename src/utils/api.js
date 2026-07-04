@@ -616,3 +616,13 @@ export const getReportDownloadUrl = (format = 'json') => {
   return `${API_BASE}/api/report/export?format=${format}&user_id=${encodeURIComponent(userId)}`;
 };
 
+// ==================== 错题自动分类 ====================
+
+export const autoClassifyWrongQuestions = (questionIds = []) => {
+  return fetchAPI('/api/wrong-questions/auto-classify', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_ids: questionIds })
+  });
+};
+

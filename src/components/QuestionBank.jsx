@@ -5,7 +5,8 @@ import {
   updateWrongQuestion,
   batchDelete,
   batchMaster,
-  getExportUrl
+  getExportUrl,
+  autoClassifyWrongQuestions
 } from '../utils/api';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -23,6 +24,23 @@ function QuestionBank() {
     search: ''
   });
   const [toast, setToast] = useState(null);
+  const [classifying, setClassifying] = useState(false);
+
+  const handleAutoClassify = async (questionIds = []) => {
+    setClassifying(true);
+    try {
+      const result = await autoClassifyWrongQuestions(questionIds);
+      const msg = questionIds.length > 0
+        ? `已补全 ${questionIds.length} 题：${result.updated} 个分类更新，${result.mappings_created} 个知识点关联`
+        : `扫描 ${result.total} 道未分类错题：${result.updated} 个分类补全，${result.mappings_created} 个知识点关联建立`;
+      showToast(msg, 'success');
+      fetchQuestions();
+    } catch (e) {
+      showToast('自动分类失败: ' + e.message, 'error');
+    } finally {
+      setClassifying(false);
+    }
+  };
 
   useEffect(() => {
     fetchQuestions();
@@ -188,6 +206,14 @@ function QuestionBank() {
         </select>
 
         <div className="filter-actions">
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleAutoClassify([])}
+            disabled={classifying}
+            title="扫描所有未分类错题，自动匹配知识点并补全分类/章节"
+          >
+            {classifying ? '⏳ 分类中...' : '🤖 一键补全分类'}
+          </button>
           <button className="btn btn-secondary" onClick={() => handleExport('csv')}>
             📊 导出CSV
           </button>
@@ -205,6 +231,13 @@ function QuestionBank() {
           </button>
           <button className="btn btn-secondary" onClick={() => handleBatchMaster(false)}>
             ✗ 取消掌握
+          </button>
+          <button
+            className="btn btn-secondary"
+            onClick={() => handleAutoClassify(Array.from(selectedIds))}
+            disabled={classifying}
+          >
+            🤖 补全选中分类
           </button>
           <button className="btn btn-danger" onClick={handleBatchDelete} style={{ color: '#fff', background: '#f44336' }}>
             🗑 删除选中
@@ -236,7 +269,7 @@ function QuestionBank() {
                     onClick={() => setSelectedQuestion(q)}
                   >
                     <div className="question-item-header">
-                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center' }}>
+                      <div style={{ display: 'flex', gap: '0.5rem', alignItems: 'center', flexWrap: 'wrap' }}>
                         <input
                           type="checkbox"
                           checked={selectedIds.has(q.id)}
@@ -244,10 +277,27 @@ function QuestionBank() {
                           onChange={() => toggleSelect(q.id)}
                           style={{ margin: 0 }}
                         />
-                        <span className="question-category">{q.category || '未分类'}</span>
+                        <span className="question-category" style={!q.category ? { color: '#999', fontStyle: 'italic' } : {}}>
+                          {q.category || '未分类'}
+                        </span>
+                        {q.chapter && (
+                          <span style={{ fontSize: '0.7rem', color: '#666', background: '#f0f0f0', padding: '0.1rem 0.4rem', borderRadius: '4px' }}>
+                            {q.chapter}
+                          </span>
+                        )}
                         <span className={`question-status ${q.is_mastered ? 'mastered' : 'not-mastered'}`}>
                           {q.is_mastered ? '✓ 已掌握' : '✗ 未掌握'}
                         </span>
+                        {q.srs_stage > 0 && (
+                          <span style={{ fontSize: '0.7rem', color: '#fff', background: '#2196f3', padding: '0.1rem 0.4rem', borderRadius: '4px' }} title="SRS 复习阶段">
+                            SRS·{q.srs_stage}
+                          </span>
+                        )}
+                        {q.wrong_count > 1 && (
+                          <span style={{ fontSize: '0.7rem', color: '#f44336', background: '#fee2e2', padding: '0.1rem 0.4rem', borderRadius: '4px' }} title="累计错误次数">
+                            ❌ {q.wrong_count}
+                          </span>
+                        )}
                       </div>
                       <span style={{ fontSize: '0.75rem', color: '#999' }}>#{q.id}</span>
                     </div>
@@ -357,9 +407,45 @@ function QuestionBank() {
               </div>
 
               <div className="detail-section">
-                <h4>分类</h4>
-                <p>{selectedQuestion.category || '未分类'}</p>
+                <h4>分类与章节</h4>
+                <p>
+                  <span style={{ fontWeight: 600 }}>分类：</span>
+                  {selectedQuestion.category || <span style={{ color: '#999', fontStyle: 'italic' }}>未分类</span>}
+                </p>
+                <p style={{ marginTop: '0.25rem' }}>
+                  <span style={{ fontWeight: 600 }}>章节：</span>
+                  {selectedQuestion.chapter || <span style={{ color: '#999', fontStyle: 'italic' }}>未指定</span>}
+                </p>
+                {(!selectedQuestion.category || !selectedQuestion.chapter) && (
+                  <button
+                    className="btn btn-secondary"
+                    style={{ marginTop: '0.5rem', padding: '0.3rem 0.6rem', fontSize: '0.8rem' }}
+                    onClick={(e) => { e.stopPropagation(); handleAutoClassify([selectedQuestion.id]); }}
+                    disabled={classifying}
+                  >
+                    🤖 自动补全此题分类
+                  </button>
+                )}
               </div>
+
+              {selectedQuestion.next_review_time && (
+                <div className="detail-section">
+                  <h4>复习计划</h4>
+                  <p>
+                    <span style={{ fontWeight: 600 }}>SRS 阶段：</span>
+                    第 {selectedQuestion.srs_stage || 0} 阶段
+                  </p>
+                  <p style={{ marginTop: '0.25rem' }}>
+                    <span style={{ fontWeight: 600 }}>下次复习：</span>
+                    {selectedQuestion.next_review_time}
+                  </p>
+                  {selectedQuestion.last_review_time && (
+                    <p style={{ marginTop: '0.25rem', fontSize: '0.8rem', color: '#888' }}>
+                      上次复习：{selectedQuestion.last_review_time}
+                    </p>
+                  )}
+                </div>
+              )}
 
               <div className="detail-actions">
                 <button
