@@ -15,8 +15,10 @@ function App({ children }) {
     { path: '/analysis', label: '错题分析', icon: '🎯' },
     { path: '/practice', label: '练习', icon: '✍️' },
     { path: '/exam', label: '模拟考试', icon: '📝' },
+    { path: '/real-exam', label: '真题模考', icon: '🏆' },
     { path: '/case', label: '案例分析', icon: '🔍' },
     { path: '/essay', label: '论文训练', icon: '✏️' },
+    { path: '/syllabus', label: '考纲覆盖', icon: '🗺️' },
     { path: '/statistics', label: '统计', icon: '📈' },
     { path: '/plan', label: '学习计划', icon: '📅' },
     { path: '/notebook', label: '笔记', icon: '🗒️' }

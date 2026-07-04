@@ -541,6 +541,25 @@ def ensure_schema():
         _seed_essay_topics(cursor)
         _seed_case_questions(cursor)
 
+        # 真题题库模块
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS real_exam_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER,
+                question_text TEXT NOT NULL,
+                options TEXT,
+                correct_answer TEXT NOT NULL,
+                explanation TEXT,
+                category TEXT,
+                kp_id INTEGER,
+                source TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_exam_year ON real_exam_questions(year)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_exam_category ON real_exam_questions(category)')
+        _seed_real_exam_questions(cursor)
+
         conn.commit()
 
 def _init_error_tags(cursor):
@@ -751,6 +770,184 @@ def _seed_case_questions(cursor):
             c['year'], c['category'], c['case_title'],
             c['background'], c['questions'], c['reference_answer'],
             c['key_points'], c['source']
+        ))
+
+
+def _seed_real_exam_questions(cursor):
+    """初始化真题选择题（系统架构设计师上午综合知识典型真题）"""
+    questions = [
+        {
+            'year': 2022, 'category': '系统架构设计',
+            'question_text': '在软件架构设计中，() 不属于构件级设计模式。',
+            'options': '["A. 单例模式","B. 适配器模式","C. MVC模式","D. 工厂方法模式"]',
+            'correct_answer': 'C',
+            'explanation': 'MVC是架构模式（更宏观），属于架构层而非构件级设计模式。单例、适配器、工厂方法都是GoF设计模式，属于构件级。',
+            'source': '2022年系统架构设计师真题'
+        },
+        {
+            'year': 2022, 'category': '系统质量属性与架构评估',
+            'question_text': 'ATAM架构评估方法中，() 用于描述架构决策对质量属性的影响程度。',
+            'options': '["A. 风险点","B. 敏感点","C. 权衡点","D. 非风险点"]',
+            'correct_answer': 'B',
+            'explanation': '敏感点是指影响某个质量属性的架构决策；风险点是可能引起问题的决策；权衡点是同时影响多个质量属性的决策。',
+            'source': '2022年系统架构设计师真题'
+        },
+        {
+            'year': 2021, 'category': '系统架构设计',
+            'question_text': '微服务架构中，() 模式用于解决服务实例的注册与发现问题。',
+            'options': '["A. API网关","B. 服务注册中心","C. 断路器","D. 配置中心"]',
+            'correct_answer': 'B',
+            'explanation': '服务注册中心负责服务实例的注册与发现。API网关负责请求路由，断路器负责故障隔离，配置中心负责配置管理。',
+            'source': '2021年系统架构设计师真题'
+        },
+        {
+            'year': 2021, 'category': '软件工程',
+            'question_text': '在敏捷开发中，() 不属于Scrum的核心角色。',
+            'options': '["A. 产品负责人","B. Scrum主管","C. 开发团队","D. 项目经理"]',
+            'correct_answer': 'D',
+            'explanation': 'Scrum的三个核心角色是：产品负责人(Product Owner)、Scrum主管(Scrum Master)、开发团队。项目经理不是Scrum角色。',
+            'source': '2021年系统架构设计师真题'
+        },
+        {
+            'year': 2020, 'category': '云原生架构',
+            'question_text': '关于云原生架构，() 是错误的描述。',
+            'options': '["A. 容器是云原生的核心技术","B. 微服务是云原生的应用架构","C. 不可变基础设施指运行时不能修改","D. DevOps是云原生的文化实践"]',
+            'correct_answer': 'C',
+            'explanation': '不可变基础设施指部署后不再修改，需要更新时替换为新实例，而非"运行时不能修改"（运行时状态可变）。容器、微服务、DevOps都是云原生核心。',
+            'source': '2020年系统架构设计师真题'
+        },
+        {
+            'year': 2020, 'category': '信息安全技术',
+            'question_text': '在公钥加密体系中，发送方用 () 对消息加密，接收方用 () 解密。',
+            'options': '["A. 接收方公钥；接收方私钥","B. 接收方私钥；接收方公钥","C. 发送方公钥；发送方私钥","D. 发送方私钥；发送方公钥"]',
+            'correct_answer': 'A',
+            'explanation': '加密通信时，发送方用接收方的公钥加密，接收方用自己的私钥解密。数字签名则相反：发送方用自己私钥签名，接收方用发送方公钥验证。',
+            'source': '2020年系统架构设计师真题'
+        },
+        {
+            'year': 2019, 'category': '数据库设计',
+            'question_text': '在分布式数据库中，() 不属于CAP定理的三个特性。',
+            'options': '["A. 一致性","B. 可用性","C. 持久性","D. 分区容错性"]',
+            'correct_answer': 'C',
+            'explanation': 'CAP定理的三个特性是：一致性(Consistency)、可用性(Availability)、分区容错性(Partition tolerance)。持久性不属于CAP。',
+            'source': '2019年系统架构设计师真题'
+        },
+        {
+            'year': 2019, 'category': '系统架构设计',
+            'question_text': 'SOA（面向服务架构）中，() 用于服务之间的松耦合集成。',
+            'options': '["A. ESB企业服务总线","B. RPC远程调用","C. 数据库共享","D. 直接方法调用"]',
+            'correct_answer': 'A',
+            'explanation': 'ESB(Enterprise Service Bus)是SOA的核心组件，提供服务路由、协议转换、消息转换，实现服务间松耦合集成。',
+            'source': '2019年系统架构设计师真题'
+        },
+        {
+            'year': 2018, 'category': '软件工程',
+            'question_text': '在软件测试中，() 测试用于验证模块间的接口和交互。',
+            'options': '["A. 单元测试","B. 集成测试","C. 系统测试","D. 验收测试"]',
+            'correct_answer': 'B',
+            'explanation': '集成测试验证模块间的接口和交互。单元测试验证单个模块，系统测试验证整个系统，验收测试由用户验证需求。',
+            'source': '2018年系统架构设计师真题'
+        },
+        {
+            'year': 2018, 'category': '系统质量属性与架构评估',
+            'question_text': '提高系统可用性的架构策略不包括 ()。',
+            'options': '["A. 心跳检测","B. 冗余部署","C. 数据库索引","D. 故障转移"]',
+            'correct_answer': 'C',
+            'explanation': '数据库索引是提高性能（查询效率）的策略，与可用性无关。心跳检测、冗余部署、故障转移都是提高可用性的策略。',
+            'source': '2018年系统架构设计师真题'
+        },
+        {
+            'year': 2022, 'category': '计算机系统基础知识',
+            'question_text': '在计算机存储体系中，Cache命中率主要取决于 ()。',
+            'options': '["A. Cache容量","B. 程序的局部性原理","C. 主存速度","D. CPU主频"]',
+            'correct_answer': 'B',
+            'explanation': 'Cache基于程序的局部性原理（时间局部性和空间局部性）工作，命中率主要取决于程序访问模式对局部性的利用程度。',
+            'source': '2022年系统架构设计师真题'
+        },
+        {
+            'year': 2021, 'category': '信息系统基础知识',
+            'question_text': '在ERP系统中，() 不属于其核心功能模块。',
+            'options': '["A. 财务管理","B. 人力资源管理","C. 视频会议","D. 供应链管理"]',
+            'correct_answer': 'C',
+            'explanation': 'ERP核心模块包括财务、人力资源、供应链、生产制造、销售管理等。视频会议不属于ERP核心功能，属于办公自动化范畴。',
+            'source': '2021年系统架构设计师真题'
+        },
+        {
+            'year': 2023, 'category': '系统架构设计',
+            'question_text': '在领域驱动设计(DDD)中，() 用于划分系统的业务边界。',
+            'options': '["A. 聚合根","B. 限界上下文","C. 值对象","D. 领域事件"]',
+            'correct_answer': 'B',
+            'explanation': '限界上下文(Bounded Context)是DDD中划分系统业务边界的核心概念，每个限界上下文对应一个业务子域。聚合根、值对象、领域事件是上下文内的概念。',
+            'source': '2023年系统架构设计师真题'
+        },
+        {
+            'year': 2023, 'category': '云原生架构',
+            'question_text': 'Kubernetes中，() 资源用于声明应用的期望状态并保证Pod副本数。',
+            'options': '["A. Service","B. Deployment","C. ConfigMap","D. Ingress"]',
+            'correct_answer': 'B',
+            'explanation': 'Deployment声明应用的期望状态，保证指定数量的Pod副本运行。Service提供网络访问，ConfigMap管理配置，Ingress管理外部访问。',
+            'source': '2023年系统架构设计师真题'
+        },
+        {
+            'year': 2022, 'category': '软件工程',
+            'question_text': '持续集成(CI)的核心实践不包括 ()。',
+            'options': '["A. 频繁提交代码","B. 自动化构建","C. 自动化测试","D. 手工发布部署"]',
+            'correct_answer': 'D',
+            'explanation': 'CI核心实践包括频繁提交、自动化构建、自动化测试。手工发布部署不属于CI（持续集成），自动化部署属于CD（持续交付/部署）。',
+            'source': '2022年系统架构设计师真题'
+        },
+        {
+            'year': 2020, 'category': '系统架构设计',
+            'question_text': '在RESTful API设计中，() 应使用HTTP POST方法。',
+            'options': '["A. 获取资源列表","B. 获取单个资源","C. 创建新资源","D. 删除资源"]',
+            'correct_answer': 'C',
+            'explanation': 'RESTful规范：GET用于获取资源(列表/单个)，POST用于创建新资源，PUT用于更新，DELETE用于删除。',
+            'source': '2020年系统架构设计师真题'
+        },
+        {
+            'year': 2019, 'category': '系统质量属性与架构评估',
+            'question_text': '系统响应时间属于 () 质量属性。',
+            'options': '["A. 性能","B. 可用性","C. 安全性","D. 可修改性"]',
+            'correct_answer': 'A',
+            'explanation': '响应时间是性能质量属性的核心指标。可用性看MTBF/MTTR，安全性看机密性/完整性，可修改性看变更成本。',
+            'source': '2019年系统架构设计师真题'
+        },
+        {
+            'year': 2021, 'category': '数据库设计',
+            'question_text': '在数据库事务的ACID特性中，() 保证事务执行后的数据一致性。',
+            'options': '["A. 原子性","B. 一致性","C. 隔离性","D. 持久性"]',
+            'correct_answer': 'B',
+            'explanation': '一致性(Consistency)保证事务执行后数据库从一个一致状态变为另一个一致状态。原子性是全做或全不做，隔离性是并发互不干扰，持久性是提交后永久保存。',
+            'source': '2021年系统架构设计师真题'
+        },
+        {
+            'year': 2023, 'category': '信息安全技术',
+            'question_text': '() 不属于等保2.0的安全等级。',
+            'options': '["A. 第一级（自主保护级）","B. 第三级（监督保护级）","C. 第五级（专控保护级）","D. 第六级（强制保护级）"]',
+            'correct_answer': 'D',
+            'explanation': '等保2.0分为五级：1自主保护、2指导保护、3监督保护、4强制保护、5专控保护。不存在第六级。',
+            'source': '2023年系统架构设计师真题'
+        },
+        {
+            'year': 2022, 'category': '系统架构设计',
+            'question_text': '在分层架构中，() 层负责业务规则的实现。',
+            'options': '["A. 表示层","B. 业务逻辑层","C. 数据访问层","D. 数据库层"]',
+            'correct_answer': 'B',
+            'explanation': '分层架构中，表示层负责UI，业务逻辑层负责业务规则，数据访问层负责数据持久化，数据库层负责数据存储。',
+            'source': '2022年系统架构设计师真题'
+        },
+    ]
+    for q in questions:
+        cursor.execute('SELECT id FROM real_exam_questions WHERE question_text = ?', (q['question_text'],))
+        if cursor.fetchone():
+            continue
+        cursor.execute('''
+            INSERT INTO real_exam_questions
+            (year, category, question_text, options, correct_answer, explanation, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            q['year'], q['category'], q['question_text'],
+            q['options'], q['correct_answer'], q['explanation'], q['source']
         ))
 
 
@@ -4961,6 +5158,279 @@ def search_textbook():
         chapters = [dict(row) for row in cursor.fetchall()]
 
     return jsonify({'items': chapters, 'total': total, 'page': page, 'limit': limit})
+
+
+# ==================== 真题题库与真实模考 ====================
+
+@app.route('/api/real-exam/questions', methods=['GET'])
+@api_response
+def get_real_exam_questions():
+    page, limit = get_pagination_params()
+    year = request.args.get('year', '')
+    category = request.args.get('category', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['1=1']
+        params = []
+        if year:
+            where_clauses.append('year = ?')
+            params.append(safe_int(year, 0))
+        if category:
+            where_clauses.append('category = ?')
+            params.append(sanitize_string(category, 50))
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM real_exam_questions WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT id, year, question_text, options, correct_answer, explanation, category, source
+            FROM real_exam_questions
+            WHERE {where_sql}
+            ORDER BY year DESC, id ASC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        questions = []
+        for row in cursor.fetchall():
+            q = dict(row)
+            try:
+                q['options_list'] = json.loads(q['options']) if q['options'] else []
+            except (json.JSONDecodeError, TypeError):
+                q['options_list'] = []
+            questions.append(q)
+
+        cursor.execute('SELECT DISTINCT category FROM real_exam_questions WHERE category IS NOT NULL ORDER BY category')
+        categories = [row['category'] for row in cursor.fetchall()]
+        cursor.execute('SELECT DISTINCT year FROM real_exam_questions WHERE year IS NOT NULL ORDER BY year DESC')
+        years = [row['year'] for row in cursor.fetchall()]
+
+    return jsonify({'items': questions, 'total': total, 'page': page, 'limit': limit, 'categories': categories, 'years': years})
+
+
+@app.route('/api/real-exam/start', methods=['POST'])
+@api_response
+def start_real_exam():
+    """创建一次真题模考：从真题题库随机抽题，存入 mock_exams 表"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    year = data.get('year')
+    question_count = safe_int(data.get('question_count', 20), 20)
+    question_count = max(5, min(75, question_count))
+    title = sanitize_string(data.get('title', '真题模考'), 100)
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM real_exam_questions')
+        total_available = cursor.fetchone()[0]
+        if total_available == 0:
+            return jsonify({'error': 'No real exam questions available'}), 400
+
+        if year:
+            cursor.execute('SELECT * FROM real_exam_questions WHERE year = ? ORDER BY RANDOM() LIMIT ?', (safe_int(year, 0), question_count))
+            rows = cursor.fetchall()
+            if not rows:
+                cursor.execute('SELECT * FROM real_exam_questions ORDER BY RANDOM() LIMIT ?', (question_count,))
+                rows = cursor.fetchall()
+        else:
+            cursor.execute('SELECT * FROM real_exam_questions ORDER BY RANDOM() LIMIT ?', (question_count,))
+            rows = cursor.fetchall()
+
+        cursor.execute('''
+            INSERT INTO mock_exams (user_id, title, exam_type, total_questions, duration_minutes, status, created_at)
+            VALUES (?, ?, 'real', ?, 150, 'draft', CURRENT_TIMESTAMP)
+        ''', (user_id, title, len(rows)))
+        exam_id = cursor.lastrowid
+
+        for idx, row in enumerate(rows):
+            cursor.execute('''
+                INSERT INTO mock_exam_questions
+                (exam_id, question_id, question_text, question_type, options, correct_answer, order_index, kp_id, explanation)
+                VALUES (?, ?, ?, 'single_choice', ?, ?, ?, NULL, ?)
+            ''', (
+                exam_id, row['id'], row['question_text'],
+                row['options'], row['correct_answer'], idx, row['explanation']
+            ))
+        conn.commit()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ?', (exam_id,))
+        exam = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'exam_id': exam_id, 'exam': exam})
+
+
+@app.route('/api/real-exam/stats', methods=['GET'])
+@api_response
+def get_real_exam_stats():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT COUNT(*) FROM mock_exams WHERE user_id = ? AND exam_type = 'real'", (user_id,))
+        total_exams = cursor.fetchone()[0]
+        cursor.execute("SELECT AVG(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND score IS NOT NULL", (user_id,))
+        avg_score = cursor.fetchone()[0]
+        cursor.execute("SELECT MAX(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND score IS NOT NULL", (user_id,))
+        best_score = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM real_exam_questions')
+        total_questions = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT id, title, score, correct_count, total_questions, submitted_at
+            FROM mock_exams
+            WHERE user_id = ? AND exam_type = 'real'
+            ORDER BY created_at DESC LIMIT 10
+        ''', (user_id,))
+        recent = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT category, COUNT(*) as cnt
+            FROM real_exam_questions
+            GROUP BY category ORDER BY cnt DESC
+        ''')
+        category_dist = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({
+        'total_exams': total_exams,
+        'avg_score': round(avg_score, 1) if avg_score else 0,
+        'best_score': round(best_score, 1) if best_score else 0,
+        'total_questions': total_questions,
+        'recent_exams': recent,
+        'category_distribution': category_dist
+    })
+
+
+# ==================== 考纲覆盖度仪表盘 ====================
+
+@app.route('/api/syllabus/coverage', methods=['GET'])
+@api_response
+def get_syllabus_coverage():
+    """考纲覆盖度：基于 knowledge_points 树 + 用户认知 + 错题映射 + 教材阅读进度"""
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 取一级章节（level=1）
+        cursor.execute('SELECT * FROM knowledge_points WHERE level = 1 ORDER BY sort_order ASC')
+        chapters = [dict(row) for row in cursor.fetchall()]
+
+        # 用户认知数据
+        cursor.execute('SELECT kp_id, mastery_score FROM user_cognition WHERE user_id = ?', (user_id,))
+        cognition_map = {row['kp_id']: row['mastery_score'] for row in cursor.fetchall()}
+
+        # 错题映射：统计每个 kp_id 的错题数和正确率
+        cursor.execute('''
+            SELECT qm.kp_id,
+                   COUNT(DISTINCT wq.id) as wrong_count,
+                   SUM(wq.is_mastered) as mastered_count
+            FROM question_mapping qm
+            JOIN wrong_questions wq ON qm.question_id = wq.id
+            WHERE wq.user_id = ?
+            GROUP BY qm.kp_id
+        ''', (user_id,))
+        question_stats = {}
+        for row in cursor.fetchall():
+            question_stats[row['kp_id']] = {
+                'wrong_count': row['wrong_count'],
+                'mastered_count': row['mastered_count'] or 0
+            }
+
+        # 教材阅读进度
+        cursor.execute('''
+            SELECT rp.status, tc.title
+            FROM reading_progress rp
+            JOIN textbook_chapters tc ON rp.chapter_id = tc.id
+            WHERE rp.user_id = ? AND rp.status = 'completed'
+        ''', (user_id,))
+        completed_chapters = [row['title'] for row in cursor.fetchall()]
+
+        result = []
+        for ch in chapters:
+            # 递归统计该章节下所有后代的覆盖情况
+            cursor.execute('''
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM knowledge_points WHERE id = ?
+                    UNION ALL
+                    SELECT kp.id FROM knowledge_points kp
+                    JOIN descendants d ON kp.parent_id = d.id
+                )
+                SELECT COUNT(*) as total_kps,
+                       SUM(CASE WHEN uc.mastery_score IS NOT NULL THEN 1 ELSE 0 END) as visited_kps,
+                       AVG(uc.mastery_score) as avg_mastery
+                FROM descendants d
+                LEFT JOIN user_cognition uc ON d.id = uc.kp_id AND uc.user_id = ?
+            ''', (ch['id'], user_id))
+            stats = cursor.fetchone()
+
+            cursor.execute('''
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM knowledge_points WHERE id = ?
+                    UNION ALL
+                    SELECT kp.id FROM knowledge_points kp
+                    JOIN descendants d ON kp.parent_id = d.id
+                )
+                SELECT COUNT(DISTINCT wq.id) as total_wrong
+                FROM descendants d
+                JOIN question_mapping qm ON d.id = qm.kp_id
+                JOIN wrong_questions wq ON qm.question_id = wq.id
+                WHERE wq.user_id = ?
+            ''', (ch['id'], user_id))
+            wrong_stats = cursor.fetchone()
+
+            total_kps = stats['total_kps'] or 0
+            visited_kps = stats['visited_kps'] or 0
+            avg_mastery = stats['avg_mastery'] or 0
+            total_wrong = wrong_stats['total_wrong'] or 0
+
+            # 覆盖度 = 已访问知识点 / 总知识点
+            coverage_rate = round(visited_kps / total_kps * 100, 1) if total_kps > 0 else 0
+            # 掌握度 = 平均认知得分（0-1 转 0-100）
+            mastery_rate = round(avg_mastery * 100, 1) if avg_mastery else 0
+
+            # 状态判定
+            if coverage_rate == 0:
+                status = 'unread'
+            elif mastery_rate >= 80 and total_wrong == 0:
+                status = 'mastered'
+            elif coverage_rate >= 50:
+                status = 'learning'
+            else:
+                status = 'weak'
+
+            result.append({
+                'id': ch['id'],
+                'name': ch['name'],
+                'category': ch['category'],
+                'exam_weight': ch['exam_weight'],
+                'total_kps': total_kps,
+                'visited_kps': visited_kps,
+                'coverage_rate': coverage_rate,
+                'mastery_rate': mastery_rate,
+                'wrong_count': total_wrong,
+                'status': status
+            })
+
+        total_chapters = len(result)
+        mastered = sum(1 for r in result if r['status'] == 'mastered')
+        learning = sum(1 for r in result if r['status'] == 'learning')
+        weak = sum(1 for r in result if r['status'] == 'weak')
+        unread = sum(1 for r in result if r['status'] == 'unread')
+        overall_coverage = round(sum(r['coverage_rate'] for r in result) / total_chapters, 1) if total_chapters else 0
+        overall_mastery = round(sum(r['mastery_rate'] for r in result) / total_chapters, 1) if total_chapters else 0
+
+    return jsonify({
+        'chapters': result,
+        'summary': {
+            'total_chapters': total_chapters,
+            'mastered_count': mastered,
+            'learning_count': learning,
+            'weak_count': weak,
+            'unread_count': unread,
+            'overall_coverage': overall_coverage,
+            'overall_mastery': overall_mastery,
+            'completed_textbook_chapters': len(completed_chapters)
+        }
+    })
 
 
 if __name__ == '__main__':

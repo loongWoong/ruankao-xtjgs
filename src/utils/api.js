@@ -474,3 +474,29 @@ export const getTextbookProgress = () => {
 export const searchTextbook = (keyword, page = 1) => {
   return fetchAPI(`/api/textbook/search?q=${encodeURIComponent(keyword)}&page=${page}`);
 };
+
+// ==================== 真题题库与真实模考 ====================
+
+export const getRealExamQuestions = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/real-exam/questions${queryString ? `?${queryString}` : ''}`);
+};
+
+export const startRealExam = (data) => {
+  return fetchAPI('/api/real-exam/start', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getRealExamStats = () => {
+  return fetchAPI('/api/real-exam/stats');
+};
+
+// ==================== 考纲覆盖度仪表盘 ====================
+
+export const getSyllabusCoverage = () => {
+  return fetchAPI('/api/syllabus/coverage');
+};
