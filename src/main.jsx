@@ -19,6 +19,8 @@ import RealExam from './components/RealExam.jsx'
 import SyllabusCoverage from './components/SyllabusCoverage.jsx'
 import StudyCheckin from './components/StudyCheckin.jsx'
 import CustomQuestions from './components/CustomQuestions.jsx'
+import ReviewQueue from './components/ReviewQueue.jsx'
+import AbilityRadar from './components/AbilityRadar.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -40,6 +42,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/syllabus" element={<SyllabusCoverage />} />
           <Route path="/checkin" element={<StudyCheckin />} />
           <Route path="/custom-questions" element={<CustomQuestions />} />
+          <Route path="/review" element={<ReviewQueue />} />
+          <Route path="/radar" element={<AbilityRadar />} />
         </Routes>
       </App>
     </Router>

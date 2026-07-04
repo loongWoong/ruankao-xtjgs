@@ -5905,6 +5905,175 @@ def import_custom_questions():
     return jsonify({'success': True, 'imported': imported, 'errors': errors, 'total': len(questions)})
 
 
+# ==================== 复习优先级队列 ====================
+
+@app.route('/api/review/queue', methods=['GET'])
+@api_response
+def get_review_queue():
+    """今日待复习队列：到期/逾期错题，按优先级排序"""
+    user_id = get_user_id()
+    limit = safe_int(request.args.get('limit', 20), 20)
+    limit = max(1, min(100, limit))
+    now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        # 优先级：逾期 > 今日到期 > 未开始SRS；同优先级按next_review_time升序
+        cursor.execute('''
+            SELECT id, question, category, chapter, srs_stage, next_review_time,
+                   wrong_count, last_review_time,
+                   CASE
+                       WHEN next_review_time IS NULL THEN 3
+                       WHEN next_review_time < ? THEN 1
+                       WHEN next_review_time <= ? THEN 2
+                       ELSE 4
+                   END as priority
+            FROM wrong_questions
+            WHERE user_id = ? AND is_mastered = 0
+            AND (next_review_time IS NULL OR next_review_time <= ?)
+            ORDER BY priority ASC, next_review_time ASC, wrong_count DESC
+            LIMIT ?
+        ''', (now, now + ' 23:59:59', user_id, now + ' 23:59:59', limit))
+        items = [dict(row) for row in cursor.fetchall()]
+
+        # 统计到期情况
+        cursor.execute('''
+            SELECT
+                SUM(CASE WHEN next_review_time IS NULL THEN 1 ELSE 0 END) as new_count,
+                SUM(CASE WHEN next_review_time < ? THEN 1 ELSE 0 END) as overdue_count,
+                SUM(CASE WHEN next_review_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as today_count,
+                COUNT(*) as total_pending
+            FROM wrong_questions
+            WHERE user_id = ? AND is_mastered = 0
+        ''', (now, now, now + ' 23:59:59', user_id))
+        stats = dict(cursor.fetchone())
+
+    return jsonify({
+        'items': items,
+        'stats': {
+            'new_count': stats['new_count'] or 0,
+            'overdue_count': stats['overdue_count'] or 0,
+            'today_count': stats['today_count'] or 0,
+            'total_pending': stats['total_pending'] or 0
+        },
+        'returned': len(items)
+    })
+
+
+@app.route('/api/review/upcoming', methods=['GET'])
+@api_response
+def get_review_upcoming():
+    """未来7天到期的复习任务预览"""
+    user_id = get_user_id()
+    days = safe_int(request.args.get('days', 7), 7)
+    days = max(1, min(30, days))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        start = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+        end = (datetime.now() + timedelta(days=days)).strftime('%Y-%m-%d %H:%M:%S')
+        cursor.execute('''
+            SELECT DATE(next_review_time) as review_date, COUNT(*) as count
+            FROM wrong_questions
+            WHERE user_id = ? AND is_mastered = 0
+            AND next_review_time BETWEEN ? AND ?
+            GROUP BY DATE(next_review_time)
+            ORDER BY review_date
+        ''', (user_id, start, end))
+        items = [dict(row) for row in cursor.fetchall()]
+    return jsonify({'days': days, 'items': items})
+
+
+# ==================== 能力雷达图 ====================
+
+@app.route('/api/stats/radar', methods=['GET'])
+@api_response
+def get_ability_radar():
+    """按章节维度的能力雷达图数据：掌握度+错题率+覆盖率"""
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        # 取顶层章节（parent_id IS NULL 或 id=parent_id）
+        cursor.execute('''
+            SELECT id, name, category FROM knowledge_points
+            WHERE parent_id IS NULL ORDER BY id
+        ''')
+        top_chapters = [dict(row) for row in cursor.fetchall()]
+
+        radar = []
+        for ch in top_chapters:
+            # 递归统计该章节下所有后代
+            cursor.execute('''
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM knowledge_points WHERE id = ?
+                    UNION ALL
+                    SELECT kp.id FROM knowledge_points kp
+                    JOIN descendants d ON kp.parent_id = d.id
+                )
+                SELECT
+                    COUNT(DISTINCT d.id) as total_kps,
+                    COUNT(DISTINCT uc.kp_id) as visited_kps,
+                    AVG(uc.mastery_score) as avg_mastery
+                FROM descendants d
+                LEFT JOIN user_cognition uc ON d.id = uc.kp_id AND uc.user_id = ?
+            ''', (ch['id'], user_id))
+            kp_stats = cursor.fetchone()
+
+            # 该章节相关错题（通过 question_mapping 关联知识点）
+            cursor.execute('''
+                WITH RECURSIVE descendants AS (
+                    SELECT id FROM knowledge_points WHERE id = ?
+                    UNION ALL
+                    SELECT kp.id FROM knowledge_points kp
+                    JOIN descendants d ON kp.parent_id = d.id
+                )
+                SELECT
+                    COUNT(DISTINCT wq.id) as total_wrong,
+                    SUM(CASE WHEN wq.is_mastered = 0 THEN 1 ELSE 0 END) as pending_wrong
+                FROM wrong_questions wq
+                JOIN question_mapping qm ON qm.question_id = wq.id
+                WHERE wq.user_id = ? AND qm.kp_id IN (SELECT id FROM descendants)
+            ''', (ch['id'], user_id))
+            wrong_stats = cursor.fetchone()
+
+            total_kps = kp_stats['total_kps'] or 0
+            visited = kp_stats['visited_kps'] or 0
+            avg_mastery = kp_stats['avg_mastery'] or 0
+            total_wrong = wrong_stats['total_wrong'] or 0
+            pending_wrong = wrong_stats['pending_wrong'] or 0
+
+            coverage = round(visited / total_kps * 100, 1) if total_kps > 0 else 0
+            mastery = round(avg_mastery, 1)
+            # 错题攻克率：已掌握错题 / 总错题
+            wrong_mastered_rate = round((total_wrong - pending_wrong) / total_wrong * 100, 1) if total_wrong > 0 else 0
+
+            radar.append({
+                'chapter_id': ch['id'],
+                'chapter': ch['name'],
+                'category': ch['category'],
+                'coverage': min(100, coverage),
+                'mastery': min(100, mastery),
+                'wrong_mastered_rate': min(100, wrong_mastered_rate),
+                'total_wrong': total_wrong,
+                'pending_wrong': pending_wrong,
+                'total_kps': total_kps,
+                'visited_kps': visited
+            })
+
+        # 按章节名排序保证雷达图稳定
+        radar.sort(key=lambda x: x['chapter'])
+
+    return jsonify({
+        'axes': ['覆盖率', '掌握度', '错题攻克率'],
+        'data': radar,
+        'summary': {
+            'avg_coverage': round(sum(r['coverage'] for r in radar) / len(radar), 1) if radar else 0,
+            'avg_mastery': round(sum(r['mastery'] for r in radar) / len(radar), 1) if radar else 0,
+            'avg_wrong_mastered': round(sum(r['wrong_mastered_rate'] for r in radar) / len(radar), 1) if radar else 0
+        }
+    })
+
+
 if __name__ == '__main__':
     ensure_schema()
     app.run(port=5002, debug=True)

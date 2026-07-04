@@ -12,6 +12,8 @@ function App({ children }) {
 
   const navItems = [
     { path: '/', label: '总览', icon: '📊' },
+    { path: '/review', label: '今日复习', icon: '🔁' },
+    { path: '/radar', label: '能力雷达', icon: '🕸️' },
     { path: '/textbook', label: '教材学习', icon: '📖' },
     { path: '/knowledge', label: '知识图谱', icon: '🌳' },
     { path: '/questions', label: '错题库', icon: '📚' },

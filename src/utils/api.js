@@ -576,3 +576,19 @@ export const importCustomQuestions = (questions) => {
     body: JSON.stringify({ questions })
   });
 };
+
+// ==================== 复习优先级队列 ====================
+
+export const getReviewQueue = (limit = 20) => {
+  return fetchAPI(`/api/review/queue?limit=${limit}`);
+};
+
+export const getReviewUpcoming = (days = 7) => {
+  return fetchAPI(`/api/review/upcoming?days=${days}`);
+};
+
+// ==================== 能力雷达图 ====================
+
+export const getAbilityRadar = () => {
+  return fetchAPI('/api/stats/radar');
+};
