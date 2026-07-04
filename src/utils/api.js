@@ -226,3 +226,141 @@ export const getMockExamList = (page = 1, pageSize = 10) => {
 export const getMockExamStats = () => {
   return fetchAPI('/api/mock-exam/stats');
 };
+
+export const analyzeError = (questionId) => {
+  return fetchAPI(`/api/error-analysis/analyze/${questionId}`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+};
+
+export const batchAnalyzeErrors = () => {
+  return fetchAPI('/api/error-analysis/batch-analyze', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+};
+
+export const getErrorTags = () => {
+  return fetchAPI('/api/error-analysis/tags');
+};
+
+export const getErrorDistribution = () => {
+  return fetchAPI('/api/error-analysis/distribution');
+};
+
+export const getErrorTrend = (days = 30) => {
+  return fetchAPI(`/api/error-analysis/trend?days=${days}`);
+};
+
+export const getErrorRecommendations = (limit = 5) => {
+  return fetchAPI(`/api/error-analysis/recommendations?limit=${limit}`);
+};
+
+export const setQuestionTags = (questionId, tagIds) => {
+  return fetchAPI(`/api/error-analysis/questions/${questionId}/tags`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ tag_ids: tagIds })
+  });
+};
+
+export const getQuestionErrorDetail = (questionId) => {
+  return fetchAPI(`/api/error-analysis/questions/${questionId}`);
+};
+
+export const createNote = (data) => {
+  return fetchAPI('/api/notes', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getNotes = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/notes${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getNote = (noteId) => {
+  return fetchAPI(`/api/notes/${noteId}`);
+};
+
+export const updateNote = (noteId, data) => {
+  return fetchAPI(`/api/notes/${noteId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const deleteNote = (noteId) => {
+  return fetchAPI(`/api/notes/${noteId}`, {
+    method: 'DELETE'
+  });
+};
+
+export const addFavorite = (targetType, targetId) => {
+  return fetchAPI('/api/favorites', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ target_type: targetType, target_id: targetId })
+  });
+};
+
+export const removeFavorite = (targetType, targetId) => {
+  return fetchAPI(`/api/favorites/${targetType}/${targetId}`, {
+    method: 'DELETE'
+  });
+};
+
+export const getFavorites = (targetType) => {
+  return fetchAPI(`/api/favorites?target_type=${targetType}`);
+};
+
+export const checkFavorite = (targetType, targetId) => {
+  return fetchAPI(`/api/favorites/check/${targetType}/${targetId}`);
+};
+
+export const getFlashcards = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/flashcards${queryString ? `?${queryString}` : ''}`);
+};
+
+export const createFlashcard = (data) => {
+  return fetchAPI('/api/flashcards', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const updateFlashcard = (cardId, data) => {
+  return fetchAPI(`/api/flashcards/${cardId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const deleteFlashcard = (cardId) => {
+  return fetchAPI(`/api/flashcards/${cardId}`, {
+    method: 'DELETE'
+  });
+};
+
+export const reviewFlashcard = (cardId, quality) => {
+  return fetchAPI(`/api/flashcards/${cardId}/review`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ quality })
+  });
+};
+
+export const getFlashcardStats = () => {
+  return fetchAPI('/api/flashcards/stats');
+};

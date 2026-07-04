@@ -384,6 +384,59 @@ def ensure_schema():
 
         _init_error_tags(cursor)
 
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS notes (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                question_id INTEGER,
+                kp_id INTEGER,
+                title TEXT,
+                content TEXT NOT NULL,
+                note_type TEXT DEFAULT 'general',
+                tags TEXT,
+                is_favorite INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS favorites (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                target_type TEXT NOT NULL,
+                target_id INTEGER NOT NULL,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, target_type, target_id)
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS flashcards (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                kp_id INTEGER,
+                front TEXT NOT NULL,
+                back TEXT NOT NULL,
+                difficulty INTEGER DEFAULT 3,
+                srs_stage INTEGER DEFAULT 0,
+                next_review_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                last_reviewed_at DATETIME,
+                review_count INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_notes_user ON notes(user_id, updated_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_notes_question ON notes(question_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_notes_kp ON notes(kp_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_favorites_user ON favorites(user_id, target_type)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_flashcards_user ON flashcards(user_id, next_review_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_flashcards_kp ON flashcards(kp_id)')
+
+        _init_default_flashcards(cursor)
+
         conn.commit()
 
 def _init_error_tags(cursor):
@@ -412,6 +465,70 @@ def _init_error_tags(cursor):
             INSERT OR IGNORE INTO error_tags (name, category, description)
             VALUES (?, ?, ?)
         ''', (name, category, description))
+
+def calculate_next_review(srs_stage, quality):
+    max_stage = 10
+    if quality < 3:
+        new_stage = 0
+        days = 1
+    elif quality == 3:
+        new_stage = srs_stage
+        days = max(1, srs_stage * 2)
+    elif quality == 4:
+        new_stage = min(srs_stage + 1, max_stage)
+        days = srs_stage * 3 if srs_stage > 0 else 1
+    elif quality == 5:
+        new_stage = min(srs_stage + 2, max_stage)
+        days = srs_stage * 5 if srs_stage > 0 else 1
+    else:
+        new_stage = srs_stage
+        days = 1
+    return new_stage, days
+
+def _init_default_flashcards(cursor):
+    cursor.execute('SELECT COUNT(*) FROM flashcards WHERE user_id = ?', ('system_default',))
+    count = cursor.fetchone()[0]
+    if count > 0:
+        return
+
+    default_cards = [
+        (13, 'Cache的作用是什么？', 'Cache（高速缓冲存储器）的主要作用是提高CPU访问存储器的速度。它利用程序访问的局部性原理（时间局部性和空间局部性），将主存中CPU近期可能访问的数据复制到Cache中，使CPU可以直接从Cache快速读取数据，从而减少访问主存的时间开销。', 3),
+        (12, '简述存储器层次结构', '存储器层次结构从上到下依次为：寄存器→Cache→主存→辅存。每层的特点：速度越来越慢，容量越来越大，单位成本越来越低。设计目标是在成本、容量和速度之间取得平衡，使整个存储系统的速度接近最快层，容量接近最大层。', 3),
+        (14, '虚拟存储器的工作原理是什么？', '虚拟存储器由主存和辅存构成，通过虚拟地址空间使用户感觉有一个很大的主存。其工作原理基于程序的局部性原理：程序运行时只将当前需要的部分装入主存，其余部分暂存于辅存。当需要访问不在主存的内容时，由操作系统自动将其从辅存调入主存。', 3),
+        (18, '总线系统的分类和作用', '总线是计算机各部件之间传输信息的公共通路。按传输内容分为：数据总线（传输数据）、地址总线（传输地址）、控制总线（传输控制信号）。按连接对象分为：内部总线、系统总线、I/O总线。总线性能指标包括：总线宽度、总线频率、带宽。', 2),
+        (21, '进程和线程的区别是什么？', '进程是资源分配的基本单位，线程是CPU调度的基本单位。主要区别：1) 进程有独立的地址空间，同一进程内的线程共享进程的地址空间；2) 进程切换开销大，线程切换开销小；3) 进程间通信复杂，线程间通信简单；4) 一个进程可以包含多个线程。', 2),
+        (22, 'PV操作的作用和基本原理', 'PV操作是一种信号量机制，用于解决进程间的同步与互斥问题。P操作（wait）：信号量减1，若结果小于0则进程阻塞；V操作（signal）：信号量加1，若结果小于等于0则唤醒一个阻塞进程。信号量S>0表示可用资源数，S<0表示等待进程数。', 4),
+        (23, '常见的进程调度算法有哪些？', '常见进程调度算法：1) 先来先服务（FCFS）：按到达顺序调度；2) 短作业优先（SJF）：优先调度短作业；3) 优先级调度：按优先级高低调度；4) 时间片轮转（RR）：每个进程轮流执行一个时间片；5) 多级反馈队列：综合多种算法的优点。', 2),
+        (24, '死锁的四个必要条件是什么？', '死锁的四个必要条件：1) 互斥条件：资源只能被一个进程占有；2) 不可剥夺条件：资源不能被强行剥夺；3) 请求和保持条件（部分分配）：进程占有资源的同时又请求新资源；4) 循环等待条件：进程间形成循环等待链。四个条件同时满足时才会发生死锁。', 3),
+        (27, '分页存储管理的基本原理', '分页存储管理将主存划分为大小相等的物理块，将进程的逻辑地址空间划分为与物理块大小相等的页。程序运行时，通过页表实现逻辑页号到物理块号的地址映射。页表记录了每个逻辑页对应的物理块号，用于实现逻辑地址到物理地址的转换。', 3),
+        (30, '文件的逻辑结构和物理结构', '文件的逻辑结构：从用户角度看文件的组织形式，分为有结构文件（记录式文件）和无结构文件（流式文件）。文件的物理结构：文件在外存上的存储组织方式，包括：连续结构、链接结构、索引结构、多重索引结构。', 2),
+        (35, '数据库三级模式两级映射是什么？', '三级模式：1) 外模式（用户模式）：用户看到的数据视图；2) 模式（概念模式）：数据库中全体数据的逻辑结构；3) 内模式（存储模式）：数据的物理存储结构。两级映射：1) 外模式/模式映射：保证数据的逻辑独立性；2) 模式/内模式映射：保证数据的物理独立性。', 3),
+        (38, '关系模型的基本概念', '关系模型用二维表（关系）来表示实体及实体间的联系。基本概念：关系（二维表）、元组（行）、属性（列）、域（属性的取值范围）、主键（唯一标识元组）、外键（引用另一个表的主键）。关系的特点：列同质、列序无关、行序无关、元组唯一。', 2),
+        (43, '数据库范式理论要点', '第一范式（1NF）：属性不可再分；第二范式（2NF）：在1NF基础上，消除非主属性对码的部分函数依赖；第三范式（3NF）：在2NF基础上，消除非主属性对码的传递函数依赖；BC范式（BCNF）：在3NF基础上，消除主属性对码的部分和传递函数依赖。', 4),
+        (39, '关系代数的基本运算有哪些？', '关系代数的基本运算包括：选择（σ）：从关系中选择满足条件的元组；投影（π）：从关系中选择若干属性列；并（∪）：两个关系的元组合并；差（-）：从一个关系中去掉另一个关系的元组；笛卡尔积（×）：两个关系的元组组合。其他运算如交、连接、除等可由基本运算导出。', 3),
+        (42, 'ER模型的基本概念', 'ER模型（实体-联系模型）是数据库概念设计的工具。基本概念：实体（客观存在并可相互区分的事物）、属性（实体的特征）、联系（实体间的关系）。实体间的联系类型：一对一（1:1）、一对多（1:n）、多对多（m:n）。ER图用矩形表示实体，椭圆表示属性，菱形表示联系。', 2),
+        (47, 'OSI七层模型各层的功能', 'OSI七层模型从下到上：1) 物理层：传输比特流；2) 数据链路层：帧传输、差错控制、流量控制；3) 网络层：路由选择、拥塞控制、网际互连；4) 传输层：端到端通信、可靠传输；5) 会话层：会话管理、同步；6) 表示层：数据格式转换、加密解密、压缩解压；7) 应用层：为应用程序提供网络服务。', 3),
+        (48, 'TCP/IP协议栈的层次结构', 'TCP/IP协议栈分为四层：1) 网络接口层（链路层）：对应OSI的物理层和数据链路层；2) 网际层（网络层）：主要协议有IP、ICMP、ARP等；3) 传输层：主要协议有TCP（可靠面向连接）和UDP（不可靠无连接）；4) 应用层：对应OSI的会话层、表示层、应用层，主要协议有HTTP、FTP、SMTP、DNS等。', 3),
+        (52, '网络层的主要功能和协议', '网络层的主要功能：路由选择（选择合适的传输路径）、拥塞控制（防止网络过载）、网际互连（不同网络之间的连接）。主要协议：IP协议（网际协议，提供不可靠的数据报服务）、ICMP（互联网控制报文协议）、ARP（地址解析协议，IP转MAC）、RARP（反向地址解析）。', 3),
+        (53, 'TCP和UDP的区别', 'TCP（传输控制协议）：面向连接、可靠传输、流量控制、拥塞控制、首部开销大（20字节以上）、适合对可靠性要求高的场景。UDP（用户数据报协议）：无连接、不可靠、首部开销小（8字节）、速度快、适合实时应用（视频、语音、直播等）。', 2),
+        (56, '常见的加密技术有哪些？', '加密技术分为对称加密和非对称加密。对称加密：加密和解密使用同一密钥，速度快，密钥分发困难。常见算法：DES、3DES、AES、RC4。非对称加密：使用公钥和私钥一对密钥，公钥加密私钥解密，或私钥签名公钥验证。安全性高，速度慢。常见算法：RSA、ECC、DSA。', 3),
+        (62, '常见的软件架构风格有哪些？', '常见的软件架构风格：1) 数据流风格：管道-过滤器、批处理；2) 调用返回风格：主程序-子程序、面向对象、层次结构；3) 独立构件风格：进程通信、事件驱动系统；4) 虚拟机风格：解释器、规则系统；5) 仓库风格：数据库系统、超文本系统、黑板系统。', 3),
+        (65, '软件质量属性——性能', '性能是指系统的响应能力，包括响应时间（请求到响应的时间）、吞吐量（单位时间处理的请求数）、资源利用率（CPU、内存等的使用情况）。性能设计策略：优先级队列、资源池、缓存、并行计算、负载均衡、异步通信、数据分片、算法优化。', 2),
+        (66, '软件质量属性——可用性', '可用性是系统正常运行时间所占的比例，通常用百分比表示（如99.9%）。衡量指标：平均故障间隔时间（MTBF）、平均修复时间（MTTR）。可用性 = MTBF / (MTBF + MTTR)。提高可用性的策略：错误检测（心跳、ping）、错误恢复（冗余、重试、回滚）、错误预防（进程监控、心跳检测）。', 3),
+        (67, '软件质量属性——安全性', '安全性是指系统在遭受恶意攻击时仍能正常运行的能力。包括：机密性（信息不被未授权访问）、完整性（信息不被篡改）、可用性（服务不被中断）、不可否认性（操作不可抵赖）。安全性策略：身份认证、访问控制、加密、数字签名、防火墙、入侵检测、安全审计。', 3),
+        (68, '软件质量属性——可修改性', '可修改性是指系统能够快速地以较高的性能价格比对系统进行变更的能力。包括：可维护性（修复缺陷）、可扩展性（添加新功能）、可移植性（迁移到不同环境）、可重组性（改变组件组合）。提高可修改性的策略：模块化、抽象、信息隐藏、高内聚低耦合、设计模式、接口与实现分离。', 3),
+        (70, 'ATAM架构评估方法', 'ATAM（架构权衡分析方法）是一种质量属性导向的架构评估方法。步骤：1) 描述业务需求和质量属性；2) 描述架构；3) 识别架构策略和模式；4) 通过质量属性效用树确定优先级；5) 分析架构方法对质量属性的影响；6) 识别风险点、敏感点、权衡点；7) 形成评估报告。', 4),
+        (76, '敏捷开发的核心价值观和原则', '敏捷开发的核心价值观（敏捷宣言）：1) 个体和交互 胜过 过程和工具；2) 可工作的软件 胜过 详尽的文档；3) 客户合作 胜过 合同谈判；4) 响应变化 胜过 遵循计划。12条原则包括：尽早持续交付、欢迎需求变化、频繁交付、业务人员与开发者共同工作、激励个体、面对面沟通、可工作软件是首要进度度量等。', 3),
+        (74, '瀑布模型的特点', '瀑布模型是经典的软件开发生命周期模型，将开发过程分为：需求分析、概要设计、详细设计、编码、测试、维护六个阶段，各阶段按顺序进行，前一阶段的输出是后一阶段的输入。特点：线性顺序、文档驱动、每个阶段结束有评审。适用于需求明确、稳定的项目。缺点：不适应需求变化、后期才能看到结果。', 2),
+        (78, '需求工程的主要活动', '需求工程包括：1) 需求获取：收集、识别用户需求；2) 需求分析：对需求进行分析、建立分析模型（数据流图、ER图等）；3) 需求规格说明：编写需求规格说明书（SRS）；4) 需求验证：对需求进行评审、验证其正确性和完整性；5) 需求管理：对需求变更进行控制和管理。', 3),
+        (61, '软件架构的定义和作用', '软件架构是系统的组织结构，包括：系统由哪些构件组成、构件之间的连接方式、构件之间的交互和协作方式、指导设计演进的原则。架构的作用：是系统设计的早期决策、是系统质量属性的载体、是利益相关者沟通的桥梁、是系统开发和维护的蓝图、是产品线复用的基础。', 2),
+    ]
+
+    for kp_id, front, back, difficulty in default_cards:
+        cursor.execute('''
+            INSERT INTO flashcards (user_id, kp_id, front, back, difficulty, srs_stage, next_review_at)
+            VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+        ''', ('system_default', kp_id, front, back, difficulty))
 
 def auto_analyze_error(cursor, question_id, question_text, user_answer, correct_answer, kp_id=None):
     question_text = question_text or ''
@@ -3477,6 +3594,526 @@ def get_question_analysis(question_id):
         'tags': tags,
         'suggestions': suggestions,
         'related_knowledge_points': related_kps
+    })
+
+
+@app.route('/api/notes', methods=['POST'])
+@api_response
+def create_note():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    question_id = data.get('question_id')
+    kp_id = data.get('kp_id')
+    title = sanitize_string(data.get('title', ''), 200)
+    content = sanitize_string(data.get('content', ''), 10000)
+    note_type = sanitize_string(data.get('note_type', 'general'), 20)
+    tags = sanitize_string(data.get('tags', ''), 500)
+    is_favorite = safe_int(data.get('is_favorite', 0), 0)
+
+    if not content:
+        return jsonify({'error': 'content is required'}), 400
+
+    if note_type not in ['question', 'kp', 'general']:
+        note_type = 'general'
+
+    is_favorite = 1 if is_favorite else 0
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO notes (
+                user_id, question_id, kp_id, title, content,
+                note_type, tags, is_favorite
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            user_id,
+            question_id if question_id else None,
+            kp_id if kp_id else None,
+            title,
+            content,
+            note_type,
+            tags,
+            is_favorite
+        ))
+        note_id = cursor.lastrowid
+        conn.commit()
+
+        cursor.execute('SELECT * FROM notes WHERE id = ?', (note_id,))
+        note = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'note': note})
+
+
+@app.route('/api/notes', methods=['GET'])
+@api_response
+def get_notes():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+    note_type = request.args.get('note_type', '')
+    kp_id = request.args.get('kp_id', '')
+    question_id = request.args.get('question_id', '')
+    search = request.args.get('search', '')
+    sort_by = request.args.get('sort_by', 'updated_at')
+    sort_order = request.args.get('sort_order', 'desc')
+
+    valid_sort_fields = ['created_at', 'updated_at', 'title']
+    if sort_by not in valid_sort_fields:
+        sort_by = 'updated_at'
+    if sort_order not in ['asc', 'desc']:
+        sort_order = 'desc'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['user_id = ?']
+        params = [user_id]
+
+        if note_type:
+            where_clauses.append('note_type = ?')
+            params.append(note_type)
+        if kp_id:
+            where_clauses.append('kp_id = ?')
+            params.append(safe_int(kp_id, 0))
+        if question_id:
+            where_clauses.append('question_id = ?')
+            params.append(safe_int(question_id, 0))
+        if search:
+            safe_search = sanitize_search_query(search)
+            if safe_search:
+                where_clauses.append('(title LIKE ? ESCAPE \'\\\' OR content LIKE ? ESCAPE \'\\\' OR tags LIKE ? ESCAPE \'\\\')')
+                like_pattern = f'%{safe_search}%'
+                params.extend([like_pattern, like_pattern, like_pattern])
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM notes WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT * FROM notes 
+            WHERE {where_sql} 
+            ORDER BY {sort_by} {sort_order}
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+
+        notes = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': notes, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/notes/<int:note_id>', methods=['GET'])
+@api_response
+def get_note(note_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM notes WHERE id = ? AND user_id = ?', (note_id, user_id))
+        note = cursor.fetchone()
+    if not note:
+        return jsonify({'error': 'Note not found'}), 404
+    return jsonify(dict(note))
+
+
+@app.route('/api/notes/<int:note_id>', methods=['PUT'])
+@api_response
+def update_note(note_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM notes WHERE id = ? AND user_id = ?', (note_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Note not found'}), 404
+
+        update_fields = []
+        params = []
+        allowed_fields = ['title', 'content', 'note_type', 'tags', 'is_favorite', 'kp_id', 'question_id']
+        for field in allowed_fields:
+            if field in data:
+                if field == 'is_favorite':
+                    update_fields.append(f'{field} = ?')
+                    params.append(1 if data[field] else 0)
+                elif field == 'content':
+                    update_fields.append(f'{field} = ?')
+                    params.append(sanitize_string(data[field], 10000))
+                elif field == 'title':
+                    update_fields.append(f'{field} = ?')
+                    params.append(sanitize_string(data[field], 200))
+                elif field == 'tags':
+                    update_fields.append(f'{field} = ?')
+                    params.append(sanitize_string(data[field], 500))
+                elif field == 'note_type':
+                    nt = sanitize_string(data[field], 20)
+                    if nt in ['question', 'kp', 'general']:
+                        update_fields.append(f'{field} = ?')
+                        params.append(nt)
+                else:
+                    update_fields.append(f'{field} = ?')
+                    params.append(data[field] if data[field] else None)
+
+        if update_fields:
+            update_fields.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(note_id)
+            cursor.execute(f'UPDATE notes SET {", ".join(update_fields)} WHERE id = ?', params)
+            conn.commit()
+
+        cursor.execute('SELECT * FROM notes WHERE id = ?', (note_id,))
+        note = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'note': note})
+
+
+@app.route('/api/notes/<int:note_id>', methods=['DELETE'])
+@api_response
+def delete_note(note_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM notes WHERE id = ? AND user_id = ?', (note_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Note not found'}), 404
+        cursor.execute('DELETE FROM notes WHERE id = ?', (note_id,))
+        conn.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/favorites', methods=['POST'])
+@api_response
+def add_favorite():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    target_type = sanitize_string(data.get('target_type', ''), 20)
+    target_id = safe_int(data.get('target_id'), 0)
+
+    if not target_type or target_id == 0:
+        return jsonify({'error': 'target_type and target_id are required'}), 400
+
+    if target_type not in ['question', 'kp', 'note']:
+        return jsonify({'error': 'target_type must be question, kp, or note'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT OR IGNORE INTO favorites (user_id, target_type, target_id)
+            VALUES (?, ?, ?)
+        ''', (user_id, target_type, target_id))
+        conn.commit()
+
+        cursor.execute('''
+            SELECT * FROM favorites 
+            WHERE user_id = ? AND target_type = ? AND target_id = ?
+        ''', (user_id, target_type, target_id))
+        favorite = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'favorite': favorite})
+
+
+@app.route('/api/favorites/<target_type>/<int:target_id>', methods=['DELETE'])
+@api_response
+def remove_favorite(target_type, target_id):
+    user_id = get_user_id()
+
+    if target_type not in ['question', 'kp', 'note']:
+        return jsonify({'error': 'target_type must be question, kp, or note'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id FROM favorites 
+            WHERE user_id = ? AND target_type = ? AND target_id = ?
+        ''', (user_id, target_type, target_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Favorite not found'}), 404
+        cursor.execute('''
+            DELETE FROM favorites 
+            WHERE user_id = ? AND target_type = ? AND target_id = ?
+        ''', (user_id, target_type, target_id))
+        conn.commit()
+
+    return jsonify({'success': True})
+
+
+@app.route('/api/favorites', methods=['GET'])
+@api_response
+def get_favorites():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+    target_type = request.args.get('target_type', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['user_id = ?']
+        params = [user_id]
+
+        if target_type:
+            where_clauses.append('target_type = ?')
+            params.append(target_type)
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM favorites WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT * FROM favorites 
+            WHERE {where_sql} 
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+
+        favorites = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': favorites, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/favorites/check/<target_type>/<int:target_id>', methods=['GET'])
+@api_response
+def check_favorite(target_type, target_id):
+    user_id = get_user_id()
+
+    if target_type not in ['question', 'kp', 'note']:
+        return jsonify({'error': 'target_type must be question, kp, or note'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id FROM favorites 
+            WHERE user_id = ? AND target_type = ? AND target_id = ?
+        ''', (user_id, target_type, target_id))
+        is_favorited = cursor.fetchone() is not None
+
+    return jsonify({'is_favorite': is_favorited})
+
+
+@app.route('/api/flashcards', methods=['GET'])
+@api_response
+def get_flashcards():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+    kp_id = request.args.get('kp_id', '')
+    due_only = request.args.get('due_only', '0')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['(user_id = ? OR user_id = ?)']
+        params = [user_id, 'system_default']
+
+        if kp_id:
+            where_clauses.append('kp_id = ?')
+            params.append(safe_int(kp_id, 0))
+        if due_only == '1':
+            where_clauses.append('next_review_at <= datetime(\'now\')')
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM flashcards WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT * FROM flashcards 
+            WHERE {where_sql} 
+            ORDER BY next_review_at ASC, id ASC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+
+        cards = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': cards, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/flashcards', methods=['POST'])
+@api_response
+def create_flashcard():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    kp_id = data.get('kp_id')
+    front = sanitize_string(data.get('front', ''), 1000)
+    back = sanitize_string(data.get('back', ''), 5000)
+    difficulty = safe_int(data.get('difficulty', 3), 3)
+
+    if not front or not back:
+        return jsonify({'error': 'front and back are required'}), 400
+
+    difficulty = max(1, min(5, difficulty))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO flashcards (
+                user_id, kp_id, front, back, difficulty
+            ) VALUES (?, ?, ?, ?, ?)
+        ''', (
+            user_id,
+            kp_id if kp_id else None,
+            front,
+            back,
+            difficulty
+        ))
+        card_id = cursor.lastrowid
+        conn.commit()
+
+        cursor.execute('SELECT * FROM flashcards WHERE id = ?', (card_id,))
+        card = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'flashcard': card})
+
+
+@app.route('/api/flashcards/<int:card_id>', methods=['PUT'])
+@api_response
+def update_flashcard(card_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM flashcards WHERE id = ? AND user_id = ?', (card_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Flashcard not found'}), 404
+
+        update_fields = []
+        params = []
+        allowed_fields = ['front', 'back', 'difficulty', 'kp_id']
+        for field in allowed_fields:
+            if field in data:
+                if field == 'front':
+                    update_fields.append(f'{field} = ?')
+                    params.append(sanitize_string(data[field], 1000))
+                elif field == 'back':
+                    update_fields.append(f'{field} = ?')
+                    params.append(sanitize_string(data[field], 5000))
+                elif field == 'difficulty':
+                    diff = max(1, min(5, safe_int(data[field], 3)))
+                    update_fields.append(f'{field} = ?')
+                    params.append(diff)
+                elif field == 'kp_id':
+                    update_fields.append(f'{field} = ?')
+                    params.append(data[field] if data[field] else None)
+
+        if update_fields:
+            update_fields.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(card_id)
+            cursor.execute(f'UPDATE flashcards SET {", ".join(update_fields)} WHERE id = ?', params)
+            conn.commit()
+
+        cursor.execute('SELECT * FROM flashcards WHERE id = ?', (card_id,))
+        card = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'flashcard': card})
+
+
+@app.route('/api/flashcards/<int:card_id>', methods=['DELETE'])
+@api_response
+def delete_flashcard(card_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM flashcards WHERE id = ? AND user_id = ?', (card_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Flashcard not found'}), 404
+        cursor.execute('DELETE FROM flashcards WHERE id = ?', (card_id,))
+        conn.commit()
+    return jsonify({'success': True})
+
+
+@app.route('/api/flashcards/<int:card_id>/review', methods=['POST'])
+@api_response
+def review_flashcard(card_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    quality = safe_int(data.get('quality', 3), 3)
+
+    quality = max(1, min(5, quality))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM flashcards WHERE id = ? AND (user_id = ? OR user_id = ?)', (card_id, user_id, 'system_default'))
+        card = cursor.fetchone()
+        if not card:
+            return jsonify({'error': 'Flashcard not found'}), 404
+
+        srs_stage = card['srs_stage'] or 0
+        new_stage, days = calculate_next_review(srs_stage, quality)
+
+        if card['user_id'] == 'system_default':
+            cursor.execute('''
+                INSERT INTO flashcards (
+                    user_id, kp_id, front, back, difficulty, srs_stage,
+                    next_review_at, last_reviewed_at, review_count
+                ) VALUES (?, ?, ?, ?, ?, ?, datetime('now', ?), CURRENT_TIMESTAMP, 1)
+            ''', (
+                user_id, card['kp_id'], card['front'], card['back'],
+                card['difficulty'], new_stage, f'+{days} day'
+            ))
+            new_card_id = cursor.lastrowid
+            card_id = new_card_id
+        else:
+            cursor.execute('''
+                UPDATE flashcards 
+                SET srs_stage = ?,
+                    next_review_at = datetime('now', ?),
+                    last_reviewed_at = CURRENT_TIMESTAMP,
+                    review_count = review_count + 1,
+                    updated_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (new_stage, f'+{days} day', card_id))
+
+        conn.commit()
+
+        cursor.execute('SELECT * FROM flashcards WHERE id = ?', (card_id,))
+        updated_card = dict(cursor.fetchone())
+
+    return jsonify({
+        'success': True,
+        'flashcard': updated_card,
+        'srs_stage': new_stage,
+        'next_review_days': days
+    })
+
+
+@app.route('/api/flashcards/stats', methods=['GET'])
+@api_response
+def get_flashcard_stats():
+    user_id = get_user_id()
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM flashcards 
+            WHERE user_id = ? OR user_id = ?
+        ''', (user_id, 'system_default'))
+        total_cards = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM flashcards 
+            WHERE (user_id = ? OR user_id = ?)
+            AND srs_stage >= 5
+        ''', (user_id, 'system_default'))
+        mastered_count = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM flashcards 
+            WHERE (user_id = ? OR user_id = ?)
+            AND next_review_at <= datetime('now')
+        ''', (user_id, 'system_default'))
+        due_count = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT COUNT(*) FROM flashcards 
+            WHERE user_id = ?
+            AND DATE(next_review_at) = DATE('now')
+        ''', (user_id,))
+        today_review = cursor.fetchone()[0]
+
+        cursor.execute('SELECT SUM(review_count) FROM flashcards WHERE user_id = ?', (user_id,))
+        total_reviews = cursor.fetchone()[0] or 0
+
+    return jsonify({
+        'total_cards': total_cards,
+        'mastered_count': mastered_count,
+        'due_count': due_count,
+        'today_review_count': today_review,
+        'total_reviews': total_reviews
     })
 
 
