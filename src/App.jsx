@@ -9,9 +9,12 @@ function App({ children }) {
 
   const navItems = [
     { path: '/', label: '总览', icon: '📊' },
+    { path: '/knowledge', label: '知识图谱', icon: '🌳' },
     { path: '/questions', label: '错题库', icon: '📚' },
     { path: '/practice', label: '练习', icon: '✍️' },
-    { path: '/statistics', label: '统计', icon: '📈' }
+    { path: '/exam', label: '模拟考试', icon: '📝' },
+    { path: '/statistics', label: '统计', icon: '📈' },
+    { path: '/plan', label: '学习计划', icon: '📅' }
   ];
 
   return (

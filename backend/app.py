@@ -8,6 +8,7 @@ import csv
 import io
 import re
 import html
+import random
 from datetime import datetime, timedelta
 from contextlib import contextmanager
 from functools import wraps
@@ -167,6 +168,24 @@ def ensure_schema():
             )
         ''')
 
+        kp_columns_to_add = [
+            ('parent_id', 'INTEGER'),
+            ('level', 'INTEGER DEFAULT 1'),
+            ('sort_order', 'INTEGER DEFAULT 0'),
+            ('exam_weight', 'REAL DEFAULT 0'),
+            ('difficulty', 'REAL DEFAULT 0.5'),
+            ('is_active', 'INTEGER DEFAULT 1')
+        ]
+        cursor.execute("PRAGMA table_info(knowledge_points)")
+        existing_kp_columns = {row["name"] for row in cursor.fetchall()}
+        for col_name, col_def in kp_columns_to_add:
+            if col_name not in existing_kp_columns:
+                cursor.execute(f"ALTER TABLE knowledge_points ADD COLUMN {col_name} {col_def}")
+
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kp_parent_id ON knowledge_points(parent_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kp_level ON knowledge_points(level)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_kp_category_level ON knowledge_points(category, level)')
+
         cursor.execute('''
             CREATE TABLE IF NOT EXISTS user_cognition (
                 id INTEGER PRIMARY KEY AUTOINCREMENT,
@@ -249,7 +268,1099 @@ def ensure_schema():
         for name, desc in default_patterns:
             cursor.execute('INSERT OR IGNORE INTO error_patterns (pattern_name, description) VALUES (?, ?)', (name, desc))
 
+        _seed_knowledge_outline(cursor)
+        _migrate_legacy_knowledge_points(cursor)
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS study_plans (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                exam_date DATE,
+                daily_target INTEGER DEFAULT 20,
+                daily_kp_target INTEGER DEFAULT 3,
+                start_date DATE DEFAULT CURRENT_DATE,
+                status TEXT DEFAULT 'active',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS daily_tasks (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                plan_id INTEGER NOT NULL,
+                user_id TEXT NOT NULL,
+                task_date DATE NOT NULL,
+                task_type TEXT NOT NULL,
+                kp_id INTEGER,
+                question_count INTEGER DEFAULT 5,
+                completed_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'pending',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_study_plans_user ON study_plans(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_tasks_user_date ON daily_tasks(user_id, task_date)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_daily_tasks_plan ON daily_tasks(plan_id)')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mock_exams (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                title TEXT NOT NULL,
+                exam_type TEXT DEFAULT 'custom',
+                total_questions INTEGER NOT NULL,
+                duration_minutes INTEGER DEFAULT 150,
+                score REAL,
+                correct_count INTEGER DEFAULT 0,
+                wrong_count INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'draft',
+                started_at DATETIME,
+                submitted_at DATETIME,
+                time_spent INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS mock_exam_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                exam_id INTEGER NOT NULL,
+                question_id INTEGER NOT NULL,
+                question_text TEXT NOT NULL,
+                question_type TEXT,
+                options TEXT,
+                correct_answer TEXT,
+                user_answer TEXT,
+                is_correct INTEGER,
+                order_index INTEGER NOT NULL,
+                kp_id INTEGER,
+                explanation TEXT
+            )
+        ''')
+
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mock_exams_user ON mock_exams(user_id, created_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_mock_exam_questions_exam ON mock_exam_questions(exam_id, order_index)')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS error_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                name TEXT NOT NULL UNIQUE,
+                category TEXT NOT NULL,
+                description TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS question_error_tags (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                question_id INTEGER NOT NULL,
+                tag_id INTEGER NOT NULL,
+                confidence REAL DEFAULT 1.0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(question_id, tag_id)
+            )
+        ''')
+
+        wq_columns_to_add = [
+            ('error_count', 'INTEGER DEFAULT 1'),
+            ('last_error_at', 'DATETIME'),
+            ('difficulty_estimate', 'REAL DEFAULT 0.5')
+        ]
+        cursor.execute("PRAGMA table_info(wrong_questions)")
+        existing_wq_columns = {row["name"] for row in cursor.fetchall()}
+        for col_name, col_def in wq_columns_to_add:
+            if col_name not in existing_wq_columns:
+                try:
+                    cursor.execute(f"ALTER TABLE wrong_questions ADD COLUMN {col_name} {col_def}")
+                except Exception:
+                    pass
+
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_error_tags_category ON error_tags(category)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_qet_question ON question_error_tags(question_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_qet_tag ON question_error_tags(tag_id)')
+
+        _init_error_tags(cursor)
+
         conn.commit()
+
+def _init_error_tags(cursor):
+    error_tags = [
+        ('概念混淆', 'concept', '对相似概念产生混淆，区分不清'),
+        ('定义不清', 'concept', '对基本定义、概念理解不清晰'),
+        ('原理误解', 'concept', '对基本原理、机制理解有误'),
+        ('分类混淆', 'concept', '对分类、归类产生混淆'),
+        ('适用场景错误', 'concept', '对技术或方法的适用场景判断错误'),
+        ('公式记错', 'memory', '公式、定理记忆错误'),
+        ('数值记混', 'memory', '数值、参数记忆混淆'),
+        ('术语遗忘', 'memory', '专业术语、名称记忆不牢'),
+        ('步骤遗漏', 'memory', '解题步骤或流程遗漏'),
+        ('计算错误', 'calculation', '数值计算过程出错'),
+        ('单位换算错', 'calculation', '单位换算或转换错误'),
+        ('公式套用错', 'calculation', '公式选择或套用错误'),
+        ('漏看条件', 'reading', '审题时遗漏题目给出的条件'),
+        ('理解偏差', 'reading', '对题目意思理解有偏差'),
+        ('选非题看错', 'reading', '选非题（不正确的是）看错要求'),
+        ('推理错误', 'logic', '推理过程存在逻辑错误'),
+        ('因果倒置', 'logic', '原因和结果关系颠倒'),
+        ('以偏概全', 'logic', '用片面的情况概括整体')
+    ]
+    for name, category, description in error_tags:
+        cursor.execute('''
+            INSERT OR IGNORE INTO error_tags (name, category, description)
+            VALUES (?, ?, ?)
+        ''', (name, category, description))
+
+def auto_analyze_error(cursor, question_id, question_text, user_answer, correct_answer, kp_id=None):
+    question_text = question_text or ''
+    user_answer = user_answer or ''
+    correct_answer = correct_answer or ''
+    
+    results = []
+    
+    def get_tag_id(tag_name):
+        cursor.execute('SELECT id FROM error_tags WHERE name = ?', (tag_name,))
+        row = cursor.fetchone()
+        return row['id'] if row else None
+    
+    q_lower = question_text.lower()
+    ua_lower = user_answer.lower()
+    ca_lower = correct_answer.lower()
+    
+    is_multiple_choice = len(correct_answer) > 1 and correct_answer.isalpha() and correct_answer.upper() == correct_answer
+    is_numeric = bool(re.search(r'\d+', question_text)) and bool(re.search(r'\d+', correct_answer))
+    
+    ua_chars = set(ua_lower)
+    ca_chars = set(ca_lower)
+    if ua_chars and ca_chars:
+        overlap = len(ua_chars & ca_chars) / len(ua_chars | ca_chars)
+    else:
+        overlap = 0
+    
+    if is_multiple_choice:
+        ua_set = set(user_answer.upper())
+        ca_set = set(correct_answer.upper())
+        if ua_set < ca_set:
+            tag_id = get_tag_id('步骤遗漏')
+            if tag_id:
+                results.append((tag_id, 0.75))
+            tag_id = get_tag_id('术语遗忘')
+            if tag_id:
+                results.append((tag_id, 0.6))
+    
+    if is_numeric:
+        ua_nums = re.findall(r'[\d.]+', user_answer)
+        ca_nums = re.findall(r'[\d.]+', correct_answer)
+        if ua_nums and ca_nums:
+            try:
+                ua_val = float(ua_nums[0])
+                ca_val = float(ca_nums[0])
+                if ca_val != 0:
+                    diff_ratio = abs(ua_val - ca_val) / abs(ca_val)
+                    if diff_ratio < 0.5:
+                        tag_id = get_tag_id('计算错误')
+                        if tag_id:
+                            results.append((tag_id, 0.8))
+                        tag_id = get_tag_id('单位换算错')
+                        if tag_id:
+                            results.append((tag_id, 0.4))
+                    else:
+                        tag_id = get_tag_id('公式套用错')
+                        if tag_id:
+                            results.append((tag_id, 0.6))
+            except (ValueError, ZeroDivisionError):
+                pass
+    
+    concept_keywords = {
+        '概念混淆': ['区别', '不同', 'vs', '比较', '混淆', '分别是', '包括'],
+        '定义不清': ['定义', '是什么', '概念', '含义', '指的是'],
+        '原理误解': ['原理', '机制', '工作', '如何', '为什么', '原因'],
+        '分类混淆': ['分类', '类型', '种类', '属于', '归类'],
+        '适用场景错误': ['适用', '应用', '场景', '用于', '适合', '情况下']
+    }
+    
+    for tag_name, keywords in concept_keywords.items():
+        for kw in keywords:
+            if kw in q_lower:
+                tag_id = get_tag_id(tag_name)
+                if tag_id:
+                    confidence = 0.5 + 0.1 * min(2, sum(1 for k in keywords if k in q_lower))
+                    results.append((tag_id, min(confidence, 0.85)))
+                break
+    
+    memory_keywords = {
+        '公式记错': ['公式', '定理', '定律', '计算式'],
+        '数值记混': ['数值', '参数', '大小', '多少', '比例'],
+        '术语遗忘': ['术语', '名称', '叫做', '称为', '简称'],
+        '步骤遗漏': ['步骤', '流程', '过程', '阶段', '顺序']
+    }
+    
+    for tag_name, keywords in memory_keywords.items():
+        for kw in keywords:
+            if kw in q_lower:
+                tag_id = get_tag_id(tag_name)
+                if tag_id:
+                    confidence = 0.5 + 0.1 * min(2, sum(1 for k in keywords if k in q_lower))
+                    results.append((tag_id, min(confidence, 0.8)))
+                break
+    
+    reading_keywords = {
+        '漏看条件': ['条件', '前提', '假设', '已知', '给定'],
+        '理解偏差': ['正确的是', '错误的是', '不正确', '不属于', '不包括'],
+        '选非题看错': ['不正确', '错误的是', '不属于', '不包括', '不是']
+    }
+    
+    for tag_name, keywords in reading_keywords.items():
+        for kw in keywords:
+            if kw in q_lower:
+                tag_id = get_tag_id(tag_name)
+                if tag_id:
+                    confidence = 0.6 + 0.1 * min(2, sum(1 for k in keywords if k in q_lower))
+                    results.append((tag_id, min(confidence, 0.85)))
+                break
+    
+    logic_keywords = {
+        '推理错误': ['推理', '推断', '推出', '结论', '因此'],
+        '因果倒置': ['因为', '所以', '导致', '引起', '原因'],
+        '以偏概全': ['都', '所有', '全部', '一般', '通常']
+    }
+    
+    for tag_name, keywords in logic_keywords.items():
+        for kw in keywords:
+            if kw in q_lower:
+                tag_id = get_tag_id(tag_name)
+                if tag_id:
+                    confidence = 0.5 + 0.1 * min(2, sum(1 for k in keywords if k in q_lower))
+                    results.append((tag_id, min(confidence, 0.8)))
+                break
+    
+    if overlap > 0.5 and len(user_answer) > 1 and len(correct_answer) > 1:
+        tag_id = get_tag_id('概念混淆')
+        if tag_id:
+            if not any(tid == tag_id for tid, _ in results):
+                results.append((tag_id, 0.7))
+    
+    if len(results) == 0:
+        tag_id = get_tag_id('定义不清')
+        if tag_id:
+            results.append((tag_id, 0.5))
+    
+    seen = set()
+    unique_results = []
+    for tag_id, conf in results:
+        if tag_id not in seen:
+            seen.add(tag_id)
+            unique_results.append((tag_id, round(conf, 2)))
+    
+    unique_results.sort(key=lambda x: x[1], reverse=True)
+    
+    return unique_results[:5]
+
+def generate_recommendations(cursor, user_id, limit=10):
+    cursor.execute('''
+        SELECT et.id, et.name, et.category, COUNT(qet.question_id) as error_count
+        FROM error_tags et
+        JOIN question_error_tags qet ON et.id = qet.tag_id
+        JOIN wrong_questions wq ON qet.question_id = wq.id
+        WHERE wq.user_id = ?
+        GROUP BY et.id, et.name, et.category
+        ORDER BY error_count DESC
+        LIMIT 3
+    ''', (user_id,))
+    top_error_types = cursor.fetchall()
+    
+    cursor.execute('''
+        SELECT kp.id, kp.name, kp.category, COALESCE(uc.mastery_score, 0.5) as mastery_score
+        FROM knowledge_points kp
+        LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+        WHERE kp.is_active = 1 AND kp.level = 3
+        ORDER BY mastery_score ASC
+        LIMIT 5
+    ''', (user_id,))
+    weak_kps = cursor.fetchall()
+    
+    builtin_questions = _get_builtin_questions()
+    
+    weak_kp_ids = [kp['id'] for kp in weak_kps]
+    
+    error_type_weights = {}
+    for idx, et in enumerate(top_error_types):
+        error_type_weights[et['category']] = 1.0 - idx * 0.2
+    
+    kp_weights = {}
+    for idx, kp in enumerate(weak_kps):
+        kp_weights[kp['id']] = 1.0 - idx * 0.15
+    
+    scored_questions = []
+    for q in builtin_questions:
+        q_kp_id = q.get('kp_id')
+        if not q_kp_id:
+            continue
+        
+        score = 0.0
+        matched_kp = False
+        matched_error = False
+        
+        if q_kp_id in kp_weights:
+            score += kp_weights[q_kp_id] * 2.0
+            matched_kp = True
+        
+        q_text = q.get('question_text', '')
+        q_lower = q_text.lower()
+        
+        for cat, weight in error_type_weights.items():
+            cat_keywords = {
+                'concept': ['概念', '定义', '原理', '分类', '区别', '不同'],
+                'memory': ['公式', '数值', '术语', '步骤', '记住'],
+                'calculation': ['计算', '数值', '等于', '多少', '单位'],
+                'reading': ['正确的是', '错误的是', '不正确', '属于', '包括'],
+                'logic': ['推理', '因为', '所以', '结论', '因此']
+            }
+            keywords = cat_keywords.get(cat, [])
+            if any(kw in q_lower for kw in keywords):
+                score += weight * 1.0
+                matched_error = True
+                break
+        
+        if matched_kp or matched_error:
+            scored_questions.append((q, score))
+    
+    scored_questions.sort(key=lambda x: x[1], reverse=True)
+    
+    recommendations = []
+    for q, score in scored_questions[:limit]:
+        kp_id = q.get('kp_id')
+        kp_name = ''
+        if kp_id:
+            cursor.execute('SELECT name FROM knowledge_points WHERE id = ?', (kp_id,))
+            kp_row = cursor.fetchone()
+            if kp_row:
+                kp_name = kp_row['name']
+        
+        related_tags = []
+        q_lower = q.get('question_text', '').lower()
+        cursor.execute('SELECT id, name, category FROM error_tags')
+        all_tags = cursor.fetchall()
+        for tag in all_tags:
+            tag_name_lower = tag['name'].lower()
+            if any(kw in q_lower for kw in tag_name_lower):
+                related_tags.append({'id': tag['id'], 'name': tag['name'], 'category': tag['category']})
+        
+        suggestions = []
+        if top_error_types:
+            for et in top_error_types:
+                suggestions.append(f'重点加强{et["name"]}类错误的练习')
+        if weak_kps:
+            for kp in weak_kps[:2]:
+                suggestions.append(f'巩固知识点：{kp["name"]}')
+        
+        recommendations.append({
+            'question': q,
+            'kp_name': kp_name,
+            'score': round(score, 2),
+            'related_tags': related_tags[:3],
+            'suggestions': suggestions[:3]
+        })
+    
+    weak_kp_list = []
+    for kp in weak_kps:
+        weak_kp_list.append({
+            'id': kp['id'],
+            'name': kp['name'],
+            'category': kp['category'],
+            'mastery_score': kp['mastery_score']
+        })
+    
+    top_error_list = []
+    for et in top_error_types:
+        top_error_list.append({
+            'id': et['id'],
+            'name': et['name'],
+            'category': et['category'],
+            'error_count': et['error_count']
+        })
+    
+    return {
+        'questions': recommendations,
+        'weak_knowledge_points': weak_kp_list,
+        'top_error_types': top_error_list
+    }
+
+def _get_builtin_questions():
+    questions = [
+        {"id": -1, "question_text": "计算机系统中，CPU的基本组成不包括以下哪项？", "question_type": "single",
+         "options": ["A. 运算器", "B. 控制器", "C. 存储器", "D. 寄存器组"], "correct_answer": "C",
+         "kp_id": 1, "explanation": "CPU由运算器、控制器和寄存器组组成，存储器是独立于CPU的部件。"},
+        {"id": -2, "question_text": "在Cache-主存层次结构中，Cache的作用是？", "question_type": "single",
+         "options": ["A. 扩大存储容量", "B. 提高存储速度", "C. 降低存储成本", "D. 增加存储密度"], "correct_answer": "B",
+         "kp_id": 2, "explanation": "Cache是高速缓冲存储器，主要作用是提高CPU访问存储器的速度，利用程序访问的局部性原理。"},
+        {"id": -3, "question_text": "虚拟存储器主要由哪两级存储器构成？", "question_type": "single",
+         "options": ["A. 寄存器-Cache", "B. Cache-主存", "C. 主存-辅存", "D. 辅存-光盘"], "correct_answer": "C",
+         "kp_id": 3, "explanation": "虚拟存储器由主存和辅存构成，通过虚拟地址空间，使用户感觉有一个很大的主存。"},
+        {"id": -4, "question_text": "以下哪种总线结构更适合高速外设的访问？", "question_type": "single",
+         "options": ["A. 单总线结构", "B. 双总线结构", "C. 三总线结构", "D. 星型结构"], "correct_answer": "C",
+         "kp_id": 4, "explanation": "三总线结构中，高速外设可以通过高速总线直接与主存交换数据，提高了I/O速度。"},
+        {"id": -5, "question_text": "进程和线程的主要区别是？", "question_type": "single",
+         "options": ["A. 进程是资源分配的基本单位，线程是CPU调度的基本单位", "B. 进程是CPU调度的基本单位，线程是资源分配的基本单位", "C. 进程和线程没有本质区别", "D. 线程不能并发执行"], "correct_answer": "A",
+         "kp_id": 5, "explanation": "进程是资源分配的基本单位，线程是CPU调度的基本单位，同一进程内的线程共享进程资源。"},
+        {"id": -6, "question_text": "PV操作是用来解决什么问题的？", "question_type": "single",
+         "options": ["A. 进程调度", "B. 进程同步与互斥", "C. 死锁检测", "D. 内存分配"], "correct_answer": "B",
+         "kp_id": 6, "explanation": "PV操作是一种信号量机制，主要用于解决进程间的同步与互斥问题。"},
+        {"id": -7, "question_text": "以下哪种进程调度算法可能导致饥饿现象？", "question_type": "single",
+         "options": ["A. 先来先服务(FCFS)", "B. 时间片轮转(RR)", "C. 优先级调度", "D. 多级反馈队列"], "correct_answer": "C",
+         "kp_id": 7, "explanation": "优先级调度中，低优先级进程可能长期得不到调度，产生饥饿现象。"},
+        {"id": -8, "question_text": "死锁的四个必要条件不包括？", "question_type": "single",
+         "options": ["A. 互斥条件", "B. 不可剥夺条件", "C. 部分分配条件", "D. 可抢占条件"], "correct_answer": "D",
+         "kp_id": 8, "explanation": "死锁的四个必要条件是：互斥、不可剥夺、请求和保持（部分分配）、循环等待。"},
+        {"id": -9, "question_text": "分页存储管理中，页表的主要作用是？", "question_type": "single",
+         "options": ["A. 记录内存使用情况", "B. 实现逻辑地址到物理地址的转换", "C. 管理磁盘空间", "D. 进行页面置换"], "correct_answer": "B",
+         "kp_id": 9, "explanation": "页表记录了逻辑页号与物理块号的对应关系，用于实现逻辑地址到物理地址的转换。"},
+        {"id": -10, "question_text": "数据库系统的三级模式结构中，不包括？", "question_type": "single",
+         "options": ["A. 外模式", "B. 模式", "C. 内模式", "D. 中间模式"], "correct_answer": "D",
+         "kp_id": 10, "explanation": "数据库三级模式是：外模式（用户模式）、模式（概念模式）、内模式（存储模式）。"},
+        {"id": -11, "question_text": "关系数据库中，实现实体之间联系的是？", "question_type": "single",
+         "options": ["A. 指针", "B. 公共属性", "C. 链表", "D. 索引"], "correct_answer": "B",
+         "kp_id": 11, "explanation": "关系数据库通过关系（表）中的公共属性（外键）来实现实体之间的联系。"},
+        {"id": -12, "question_text": "SQL语言中，用于查询数据的语句是？", "question_type": "single",
+         "options": ["A. INSERT", "B. UPDATE", "C. SELECT", "D. DELETE"], "correct_answer": "C",
+         "kp_id": 12, "explanation": "SELECT语句用于查询数据，INSERT用于插入，UPDATE用于更新，DELETE用于删除。"},
+        {"id": -13, "question_text": "ER模型中，实体之间的联系不包括？", "question_type": "single",
+         "options": ["A. 一对一联系", "B. 一对多联系", "C. 多对多联系", "D. 多对一联系"], "correct_answer": "D",
+         "kp_id": 13, "explanation": "ER模型中实体间的联系有：一对一、一对多、多对多。多对一是一对多的反向，不是独立类型。"},
+        {"id": -14, "question_text": "关系模式规范化中，第二范式要求消除？", "question_type": "single",
+         "options": ["A. 传递依赖", "B. 部分依赖", "C. 多值依赖", "D. 连接依赖"], "correct_answer": "B",
+         "kp_id": 14, "explanation": "第二范式（2NF）要求在1NF基础上，消除非主属性对码的部分函数依赖。"},
+        {"id": -15, "question_text": "OSI七层模型中，负责数据压缩和加密的是？", "question_type": "single",
+         "options": ["A. 网络层", "B. 传输层", "C. 表示层", "D. 会话层"], "correct_answer": "C",
+         "kp_id": 15, "explanation": "表示层负责数据格式转换、数据加密和解密、数据压缩和解压缩等。"},
+        {"id": -16, "question_text": "TCP协议工作在OSI模型的哪一层？", "question_type": "single",
+         "options": ["A. 网络层", "B. 传输层", "C. 会话层", "D. 应用层"], "correct_answer": "B",
+         "kp_id": 16, "explanation": "TCP（传输控制协议）是传输层协议，提供可靠的面向连接的数据传输服务。"},
+        {"id": -17, "question_text": "以下哪个IP地址属于B类地址？", "question_type": "single",
+         "options": ["A. 10.0.0.1", "B. 172.16.0.1", "C. 192.168.1.1", "D. 224.0.0.1"], "correct_answer": "B",
+         "kp_id": 17, "explanation": "B类地址范围是128.0.0.0到191.255.255.255，172.16.0.1属于B类地址。"},
+        {"id": -18, "question_text": "软件架构风格中，管道-过滤器风格的主要特点是？", "question_type": "single",
+         "options": ["A. 事件驱动", "B. 数据流驱动", "C. 调用返回", "D. 层次结构"], "correct_answer": "B",
+         "kp_id": 18, "explanation": "管道-过滤器风格是数据流风格的一种，数据在各个过滤器之间通过管道传递，每个过滤器独立处理数据。"},
+        {"id": -19, "question_text": "软件质量属性中，可修改性不包括？", "question_type": "single",
+         "options": ["A. 可维护性", "B. 可扩展性", "C. 性能", "D. 可移植性"], "correct_answer": "C",
+         "kp_id": 19, "explanation": "可修改性包括可维护性、可扩展性、可移植性等，性能是独立的质量属性。"},
+        {"id": -20, "question_text": "ATAM架构评估方法主要关注？", "question_type": "single",
+         "options": ["A. 功能需求", "B. 质量属性", "C. 项目进度", "D. 开发成本"], "correct_answer": "B",
+         "kp_id": 20, "explanation": "ATAM（架构权衡分析方法）是一种质量属性导向的架构评估方法，关注系统的质量属性及其权衡。"},
+        {"id": -21, "question_text": "以下哪些属于操作系统的功能？", "question_type": "multiple",
+         "options": ["A. 进程管理", "B. 存储管理", "C. 文件管理", "D. 编译程序"], "correct_answer": "ABC",
+         "kp_id": 5, "explanation": "操作系统的主要功能包括：进程管理、存储管理、文件管理、设备管理、作业管理。编译程序属于系统软件，不是操作系统功能。"},
+        {"id": -22, "question_text": "以下哪些是关系数据库的基本运算？", "question_type": "multiple",
+         "options": ["A. 选择", "B. 投影", "C. 连接", "D. 排序"], "correct_answer": "ABC",
+         "kp_id": 11, "explanation": "关系代数的基本运算包括：选择、投影、并、差、笛卡尔积、连接等。排序不是基本运算，是输出时的操作。"},
+        {"id": -23, "question_text": "TCP/IP协议栈包括以下哪些层？", "question_type": "multiple",
+         "options": ["A. 应用层", "B. 传输层", "C. 网络层", "D. 会话层"], "correct_answer": "ABC",
+         "kp_id": 16, "explanation": "TCP/IP协议栈分为四层：应用层、传输层、网络层（网际层）、网络接口层。会话层是OSI模型的概念。"},
+        {"id": -24, "question_text": "以下哪些属于软件架构风格？", "question_type": "multiple",
+         "options": ["A. 管道-过滤器", "B. 面向对象", "C. 客户机/服务器", "D. 瀑布模型"], "correct_answer": "ABC",
+         "kp_id": 18, "explanation": "常见的架构风格包括：管道-过滤器、面向对象、客户机/服务器、分层、事件驱动等。瀑布模型是软件开发过程模型。"},
+        {"id": -25, "question_text": "软件质量属性包括以下哪些？", "question_type": "multiple",
+         "options": ["A. 性能", "B. 可用性", "C. 安全性", "D. 代码行数"], "correct_answer": "ABC",
+         "kp_id": 19, "explanation": "软件质量属性包括：性能、可用性、安全性、可修改性、易用性、可测试性等。代码行数是度量指标，不是质量属性。"},
+        {"id": -26, "question_text": "Cache的命中率越高，说明存储系统的访问效率越高。", "question_type": "judge",
+         "options": ["正确", "错误"], "correct_answer": "正确",
+         "kp_id": 2, "explanation": "Cache命中率是CPU在Cache中找到所需数据的概率，命中率越高，说明需要访问主存的次数越少，系统访问效率越高。"},
+        {"id": -27, "question_text": "进程从运行态到就绪态的转换是由进程调度程序引起的。", "question_type": "judge",
+         "options": ["正确", "错误"], "correct_answer": "错误",
+         "kp_id": 7, "explanation": "进程从运行态到就绪态的转换通常是由时钟中断引起的（时间片用完），而进程调度引起的是从就绪态到运行态的转换。"},
+        {"id": -28, "question_text": "在关系数据库中，外键的值可以为空。", "question_type": "judge",
+         "options": ["正确", "错误"], "correct_answer": "正确",
+         "kp_id": 11, "explanation": "外键允许为空值，表示该实体与另一实体之间没有关联。但如果外键有值，则该值必须参照主表中的主键值。"},
+        {"id": -29, "question_text": "UDP协议是一种可靠的传输层协议。", "question_type": "judge",
+         "options": ["正确", "错误"], "correct_answer": "错误",
+         "kp_id": 16, "explanation": "UDP是用户数据报协议，提供不可靠的、无连接的数据报服务。TCP才是可靠的、面向连接的传输层协议。"},
+        {"id": -30, "question_text": "软件架构设计只需考虑功能需求，不需要考虑质量属性。", "question_type": "judge",
+         "options": ["正确", "错误"], "correct_answer": "错误",
+         "kp_id": 19, "explanation": "软件架构设计不仅要考虑功能需求，更重要的是要满足质量属性需求，如性能、可用性、安全性、可修改性等。"},
+        {"id": -31, "question_text": "敏捷开发的特点不包括？", "question_type": "single",
+         "options": ["A. 迭代开发", "B. 响应变化", "C. 详细的文档", "D. 客户参与"], "correct_answer": "C",
+         "kp_id": 21, "explanation": "敏捷开发强调可工作的软件高于详尽的文档，重视响应变化、迭代开发和客户参与。"},
+        {"id": -32, "question_text": "软件需求工程中，需求分析的主要任务是？", "question_type": "single",
+         "options": ["A. 获取用户需求", "B. 建立分析模型", "C. 编写需求规格说明", "D. 需求评审"], "correct_answer": "B",
+         "kp_id": 22, "explanation": "需求分析的主要任务是对需求进行分析建模，建立各种分析模型（如数据流图、ER图等）。"}
+    ]
+    return questions
+
+
+def generate_exam_questions(cursor, user_id, exam_type, question_count, kp_ids=None):
+    builtin_questions = _get_builtin_questions()
+    
+    all_questions = list(builtin_questions)
+    
+    if exam_type == 'chapter' and kp_ids:
+        kp_id_set = set(kp_ids)
+        all_questions = [q for q in all_questions if q.get('kp_id') in kp_id_set]
+    
+    cursor.execute('''
+        SELECT wq.id, wq.question as question_text, wq.options, wq.correct_answer, 
+               wq.analysis as explanation, wq.category, wq.chapter
+        FROM wrong_questions wq
+        WHERE wq.user_id = ? AND wq.is_mastered = 0
+        ORDER BY wq.wrong_count DESC, wq.srs_stage ASC
+        LIMIT ?
+    ''', (user_id, question_count))
+    
+    wrong_question_rows = cursor.fetchall()
+    wrong_questions = []
+    for row in wrong_question_rows:
+        options_list = json.loads(row['options']) if row['options'] else []
+        wrong_questions.append({
+            'id': row['id'],
+            'question_text': row['question_text'],
+            'question_type': 'single' if len(options_list) > 0 else 'judge',
+            'options': options_list,
+            'correct_answer': row['correct_answer'],
+            'kp_id': None,
+            'explanation': row['explanation']
+        })
+    
+    wrong_count = min(len(wrong_questions), int(question_count * 0.3))
+    selected_wrong = wrong_questions[:wrong_count]
+    
+    remaining = question_count - wrong_count
+    remaining = max(0, remaining)
+    
+    if len(all_questions) >= remaining:
+        selected_builtin = random.sample(all_questions, remaining)
+    else:
+        selected_builtin = all_questions[:]
+    
+    final_questions = selected_builtin + selected_wrong
+    random.shuffle(final_questions)
+    
+    if len(final_questions) > question_count:
+        final_questions = final_questions[:question_count]
+    
+    return final_questions
+
+
+def _seed_knowledge_outline(cursor):
+    outline = [
+        {
+            "name": "第1章 计算机组成与体系结构",
+            "category": "计算机组成与体系结构",
+            "level": 1,
+            "sort_order": 1,
+            "exam_weight": 0.08,
+            "difficulty": 0.6,
+            "children": [
+                {
+                    "name": "1.1 计算机系统组成",
+                    "category": "计算机组成与体系结构",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.025,
+                    "difficulty": 0.5,
+                    "children": [
+                        {"name": "计算机硬件组成", "category": "计算机组成与体系结构", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.4},
+                        {"name": "计算机软件组成", "category": "计算机组成与体系结构", "level": 3, "sort_order": 2, "exam_weight": 0.008, "difficulty": 0.5},
+                        {"name": "计算机系统分类", "category": "计算机组成与体系结构", "level": 3, "sort_order": 3, "exam_weight": 0.007, "difficulty": 0.6}
+                    ]
+                },
+                {
+                    "name": "1.2 存储系统",
+                    "category": "计算机组成与体系结构",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.03,
+                    "difficulty": 0.65,
+                    "children": [
+                        {"name": "存储器层次结构", "category": "计算机组成与体系结构", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.5},
+                        {"name": "Cache存储器", "category": "计算机组成与体系结构", "level": 3, "sort_order": 2, "exam_weight": 0.012, "difficulty": 0.7},
+                        {"name": "虚拟存储器", "category": "计算机组成与体系结构", "level": 3, "sort_order": 3, "exam_weight": 0.008, "difficulty": 0.7}
+                    ]
+                },
+                {
+                    "name": "1.3 输入输出系统",
+                    "category": "计算机组成与体系结构",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.025,
+                    "difficulty": 0.6,
+                    "children": [
+                        {"name": "I/O接口", "category": "计算机组成与体系结构", "level": 3, "sort_order": 1, "exam_weight": 0.008, "difficulty": 0.6},
+                        {"name": "I/O设备", "category": "计算机组成与体系结构", "level": 3, "sort_order": 2, "exam_weight": 0.007, "difficulty": 0.5},
+                        {"name": "总线系统", "category": "计算机组成与体系结构", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.7}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "第2章 操作系统",
+            "category": "操作系统",
+            "level": 1,
+            "sort_order": 2,
+            "exam_weight": 0.10,
+            "difficulty": 0.65,
+            "children": [
+                {
+                    "name": "2.1 进程管理",
+                    "category": "操作系统",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.04,
+                    "difficulty": 0.7,
+                    "children": [
+                        {"name": "进程与线程", "category": "操作系统", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.6},
+                        {"name": "进程同步与互斥", "category": "操作系统", "level": 3, "sort_order": 2, "exam_weight": 0.012, "difficulty": 0.8},
+                        {"name": "进程调度", "category": "操作系统", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.7},
+                        {"name": "死锁", "category": "操作系统", "level": 3, "sort_order": 4, "exam_weight": 0.008, "difficulty": 0.7}
+                    ]
+                },
+                {
+                    "name": "2.2 存储管理",
+                    "category": "操作系统",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.03,
+                    "difficulty": 0.65,
+                    "children": [
+                        {"name": "内存管理", "category": "操作系统", "level": 3, "sort_order": 1, "exam_weight": 0.008, "difficulty": 0.5},
+                        {"name": "分页存储", "category": "操作系统", "level": 3, "sort_order": 2, "exam_weight": 0.012, "difficulty": 0.7},
+                        {"name": "分段存储", "category": "操作系统", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.6}
+                    ]
+                },
+                {
+                    "name": "2.3 文件管理",
+                    "category": "操作系统",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.03,
+                    "difficulty": 0.6,
+                    "children": [
+                        {"name": "文件结构", "category": "操作系统", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.6},
+                        {"name": "目录结构", "category": "操作系统", "level": 3, "sort_order": 2, "exam_weight": 0.01, "difficulty": 0.5},
+                        {"name": "文件存取方法", "category": "操作系统", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.6}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "第3章 数据库系统",
+            "category": "数据库系统",
+            "level": 1,
+            "sort_order": 3,
+            "exam_weight": 0.10,
+            "difficulty": 0.6,
+            "children": [
+                {
+                    "name": "3.1 数据库模式",
+                    "category": "数据库系统",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.025,
+                    "difficulty": 0.55,
+                    "children": [
+                        {"name": "三级模式两级映射", "category": "数据库系统", "level": 3, "sort_order": 1, "exam_weight": 0.012, "difficulty": 0.6},
+                        {"name": "数据独立性", "category": "数据库系统", "level": 3, "sort_order": 2, "exam_weight": 0.013, "difficulty": 0.5}
+                    ]
+                },
+                {
+                    "name": "3.2 关系数据库",
+                    "category": "数据库系统",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.04,
+                    "difficulty": 0.65,
+                    "children": [
+                        {"name": "关系模型", "category": "数据库系统", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.5},
+                        {"name": "关系代数", "category": "数据库系统", "level": 3, "sort_order": 2, "exam_weight": 0.015, "difficulty": 0.7},
+                        {"name": "SQL语言", "category": "数据库系统", "level": 3, "sort_order": 3, "exam_weight": 0.015, "difficulty": 0.7}
+                    ]
+                },
+                {
+                    "name": "3.3 数据库设计",
+                    "category": "数据库系统",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.035,
+                    "difficulty": 0.7,
+                    "children": [
+                        {"name": "ER模型", "category": "数据库系统", "level": 3, "sort_order": 1, "exam_weight": 0.012, "difficulty": 0.7},
+                        {"name": "范式理论", "category": "数据库系统", "level": 3, "sort_order": 2, "exam_weight": 0.013, "difficulty": 0.75},
+                        {"name": "数据库设计步骤", "category": "数据库系统", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.6}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "第4章 计算机网络",
+            "category": "计算机网络",
+            "level": 1,
+            "sort_order": 4,
+            "exam_weight": 0.08,
+            "difficulty": 0.6,
+            "children": [
+                {
+                    "name": "4.1 网络体系结构",
+                    "category": "计算机网络",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.02,
+                    "difficulty": 0.5,
+                    "children": [
+                        {"name": "OSI七层模型", "category": "计算机网络", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.5},
+                        {"name": "TCP/IP协议栈", "category": "计算机网络", "level": 3, "sort_order": 2, "exam_weight": 0.01, "difficulty": 0.5}
+                    ]
+                },
+                {
+                    "name": "4.2 网络协议",
+                    "category": "计算机网络",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.04,
+                    "difficulty": 0.65,
+                    "children": [
+                        {"name": "物理层", "category": "计算机网络", "level": 3, "sort_order": 1, "exam_weight": 0.006, "difficulty": 0.5},
+                        {"name": "数据链路层", "category": "计算机网络", "level": 3, "sort_order": 2, "exam_weight": 0.008, "difficulty": 0.6},
+                        {"name": "网络层", "category": "计算机网络", "level": 3, "sort_order": 3, "exam_weight": 0.01, "difficulty": 0.7},
+                        {"name": "传输层", "category": "计算机网络", "level": 3, "sort_order": 4, "exam_weight": 0.009, "difficulty": 0.7},
+                        {"name": "应用层", "category": "计算机网络", "level": 3, "sort_order": 5, "exam_weight": 0.007, "difficulty": 0.6}
+                    ]
+                },
+                {
+                    "name": "4.3 网络安全",
+                    "category": "计算机网络",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.02,
+                    "difficulty": 0.7,
+                    "children": [
+                        {"name": "加密技术", "category": "计算机网络", "level": 3, "sort_order": 1, "exam_weight": 0.008, "difficulty": 0.75},
+                        {"name": "认证技术", "category": "计算机网络", "level": 3, "sort_order": 2, "exam_weight": 0.006, "difficulty": 0.7},
+                        {"name": "防火墙", "category": "计算机网络", "level": 3, "sort_order": 3, "exam_weight": 0.006, "difficulty": 0.65}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "第5章 系统架构设计",
+            "category": "系统架构设计",
+            "level": 1,
+            "sort_order": 5,
+            "exam_weight": 0.12,
+            "difficulty": 0.7,
+            "children": [
+                {
+                    "name": "5.1 架构基础",
+                    "category": "系统架构设计",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.04,
+                    "difficulty": 0.6,
+                    "children": [
+                        {"name": "架构定义", "category": "系统架构设计", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.5},
+                        {"name": "架构风格", "category": "系统架构设计", "level": 3, "sort_order": 2, "exam_weight": 0.018, "difficulty": 0.7},
+                        {"name": "架构视图", "category": "系统架构设计", "level": 3, "sort_order": 3, "exam_weight": 0.012, "difficulty": 0.6}
+                    ]
+                },
+                {
+                    "name": "5.2 质量属性",
+                    "category": "系统架构设计",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.05,
+                    "difficulty": 0.75,
+                    "children": [
+                        {"name": "性能", "category": "系统架构设计", "level": 3, "sort_order": 1, "exam_weight": 0.012, "difficulty": 0.7},
+                        {"name": "可用性", "category": "系统架构设计", "level": 3, "sort_order": 2, "exam_weight": 0.013, "difficulty": 0.75},
+                        {"name": "安全性", "category": "系统架构设计", "level": 3, "sort_order": 3, "exam_weight": 0.012, "difficulty": 0.75},
+                        {"name": "可修改性", "category": "系统架构设计", "level": 3, "sort_order": 4, "exam_weight": 0.013, "difficulty": 0.8}
+                    ]
+                },
+                {
+                    "name": "5.3 架构评估",
+                    "category": "系统架构设计",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.03,
+                    "difficulty": 0.7,
+                    "children": [
+                        {"name": "ATAM方法", "category": "系统架构设计", "level": 3, "sort_order": 1, "exam_weight": 0.015, "difficulty": 0.75},
+                        {"name": "SAAM方法", "category": "系统架构设计", "level": 3, "sort_order": 2, "exam_weight": 0.015, "difficulty": 0.7}
+                    ]
+                }
+            ]
+        },
+        {
+            "name": "第6章 软件工程",
+            "category": "软件工程",
+            "level": 1,
+            "sort_order": 6,
+            "exam_weight": 0.10,
+            "difficulty": 0.65,
+            "children": [
+                {
+                    "name": "6.1 开发模型",
+                    "category": "软件工程",
+                    "level": 2,
+                    "sort_order": 1,
+                    "exam_weight": 0.03,
+                    "difficulty": 0.6,
+                    "children": [
+                        {"name": "瀑布模型", "category": "软件工程", "level": 3, "sort_order": 1, "exam_weight": 0.009, "difficulty": 0.5},
+                        {"name": "螺旋模型", "category": "软件工程", "level": 3, "sort_order": 2, "exam_weight": 0.01, "difficulty": 0.6},
+                        {"name": "敏捷开发", "category": "软件工程", "level": 3, "sort_order": 3, "exam_weight": 0.011, "difficulty": 0.7}
+                    ]
+                },
+                {
+                    "name": "6.2 需求工程",
+                    "category": "软件工程",
+                    "level": 2,
+                    "sort_order": 2,
+                    "exam_weight": 0.035,
+                    "difficulty": 0.65,
+                    "children": [
+                        {"name": "需求获取", "category": "软件工程", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.6},
+                        {"name": "需求分析", "category": "软件工程", "level": 3, "sort_order": 2, "exam_weight": 0.013, "difficulty": 0.7},
+                        {"name": "需求规格说明", "category": "软件工程", "level": 3, "sort_order": 3, "exam_weight": 0.012, "difficulty": 0.65}
+                    ]
+                },
+                {
+                    "name": "6.3 系统设计",
+                    "category": "软件工程",
+                    "level": 2,
+                    "sort_order": 3,
+                    "exam_weight": 0.035,
+                    "difficulty": 0.7,
+                    "children": [
+                        {"name": "概要设计", "category": "软件工程", "level": 3, "sort_order": 1, "exam_weight": 0.01, "difficulty": 0.65},
+                        {"name": "详细设计", "category": "软件工程", "level": 3, "sort_order": 2, "exam_weight": 0.013, "difficulty": 0.75},
+                        {"name": "界面设计", "category": "软件工程", "level": 3, "sort_order": 3, "exam_weight": 0.012, "difficulty": 0.7}
+                    ]
+                }
+            ]
+        }
+    ]
+
+    def insert_node(node, parent_id=None):
+        cursor.execute('''
+            INSERT OR IGNORE INTO knowledge_points 
+            (name, category, level, parent_id, sort_order, exam_weight, difficulty, is_active)
+            VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+        ''', (
+            node["name"],
+            node["category"],
+            node["level"],
+            parent_id,
+            node["sort_order"],
+            node["exam_weight"],
+            node["difficulty"]
+        ))
+        cursor.execute('SELECT id FROM knowledge_points WHERE name = ?', (node["name"],))
+        row = cursor.fetchone()
+        node_id = row["id"] if row else None
+        if node_id and "children" in node:
+            for child in node["children"]:
+                insert_node(child, node_id)
+
+    for chapter in outline:
+        insert_node(chapter)
+
+
+def get_kp_mastery(cursor, kp_id, user_id):
+    cursor.execute('''
+        SELECT mastery_score FROM user_cognition 
+        WHERE kp_id = ? AND user_id = ?
+    ''', (kp_id, user_id))
+    row = cursor.fetchone()
+    return row["mastery_score"] if row else 0.5
+
+
+def _migrate_legacy_knowledge_points(cursor):
+    cursor.execute('SELECT COUNT(*) FROM knowledge_points WHERE level = 1 AND parent_id IS NULL')
+    root_count = cursor.fetchone()[0]
+    if root_count <= 6:
+        return
+    
+    cursor.execute('SELECT DISTINCT parent_id FROM knowledge_points WHERE parent_id IS NOT NULL AND level = 2')
+    has_section_children = {row['parent_id'] for row in cursor.fetchall()}
+    
+    cursor.execute('SELECT id FROM knowledge_points WHERE level = 1 AND parent_id IS NULL')
+    all_root_ids = [row['id'] for row in cursor.fetchall()]
+    
+    legacy_ids = [rid for rid in all_root_ids if rid not in has_section_children]
+    
+    if legacy_ids:
+        placeholders = ','.join(['?'] * len(legacy_ids))
+        cursor.execute(f'UPDATE knowledge_points SET is_active = 0 WHERE id IN ({placeholders})', legacy_ids)
+        cursor.execute(f'''
+            UPDATE knowledge_points SET is_active = 0 
+            WHERE parent_id IN ({placeholders})
+        ''', legacy_ids)
+
+
+def build_knowledge_tree(rows, mastery_map=None):
+    id_to_node = {}
+    root_nodes = []
+    
+    for row in rows:
+        node = {
+            "id": row["id"],
+            "name": row["name"],
+            "category": row["category"] if "category" in row.keys() else None,
+            "level": row["level"] if "level" in row.keys() else 1,
+            "children": []
+        }
+        if mastery_map and row["id"] in mastery_map:
+            node["mastery_score"] = mastery_map[row["id"]]
+        else:
+            node["mastery_score"] = 0.5
+        id_to_node[row["id"]] = node
+    
+    for row in rows:
+        parent_id = row["parent_id"] if "parent_id" in row.keys() else None
+        if parent_id and parent_id in id_to_node:
+            id_to_node[parent_id]["children"].append(id_to_node[row["id"]])
+        else:
+            root_nodes.append(id_to_node[row["id"]])
+    
+    def sort_children(nodes):
+        nodes.sort(key=lambda x: x.get("level", 0) * 1000 + x.get("id", 0))
+        for node in nodes:
+            if node["children"]:
+                sort_children(node["children"])
+    
+    sort_children(root_nodes)
+    return root_nodes
+
+
+SRS_REVIEW_INTERVALS = [1, 2, 4, 7, 15, 30]
+
+
+def days_until_exam(exam_date):
+    if isinstance(exam_date, str):
+        exam_date = datetime.strptime(exam_date, '%Y-%m-%d').date()
+    today = datetime.now().date()
+    return (exam_date - today).days
+
+
+def get_task_detail(cursor, task):
+    task_dict = dict(task)
+    if task_dict.get('kp_id'):
+        cursor.execute('SELECT name, category, chapter FROM knowledge_points WHERE id = ?', (task_dict['kp_id'],))
+        kp = cursor.fetchone()
+        if kp:
+            task_dict['kp_name'] = kp['name']
+            task_dict['kp_category'] = kp['category']
+    return task_dict
+
+
+def calculate_daily_tasks(cursor, user_id, plan_id, start_date, kps_to_learn, daily_kp_target, daily_target):
+    tasks = []
+    learned_kps = []
+
+    total_days = max(1, (len(kps_to_learn) + daily_kp_target - 1) // daily_kp_target)
+
+    for day_idx in range(min(total_days, 60)):
+        current_date = start_date + timedelta(days=day_idx)
+        date_str = current_date.strftime('%Y-%m-%d')
+
+        new_kps = kps_to_learn[day_idx * daily_kp_target:(day_idx + 1) * daily_kp_target]
+        for kp in new_kps:
+            tasks.append({
+                'plan_id': plan_id,
+                'user_id': user_id,
+                'task_date': date_str,
+                'task_type': 'learn',
+                'kp_id': kp['id'],
+                'question_count': 5,
+                'completed_count': 0,
+                'status': 'pending'
+            })
+            learned_kps.append({'kp_id': kp['id'], 'learned_day': day_idx})
+
+        for learned in learned_kps[:-len(new_kps)] if new_kps else learned_kps:
+            days_since_learn = day_idx - learned['learned_day']
+            if days_since_learn in SRS_REVIEW_INTERVALS:
+                tasks.append({
+                    'plan_id': plan_id,
+                    'user_id': user_id,
+                    'task_date': date_str,
+                    'task_type': 'review',
+                    'kp_id': learned['kp_id'],
+                    'question_count': 3,
+                    'completed_count': 0,
+                    'status': 'pending'
+                })
+
+        practice_count = max(0, daily_target - len([t for t in tasks if t['task_date'] == date_str]) * 5)
+        if practice_count > 0:
+            tasks.append({
+                'plan_id': plan_id,
+                'user_id': user_id,
+                'task_date': date_str,
+                'task_type': 'practice',
+                'kp_id': None,
+                'question_count': min(practice_count, 10),
+                'completed_count': 0,
+                'status': 'pending'
+            })
+
+    return tasks
+
+
+def generate_study_plan(cursor, user_id, exam_date, daily_target=20, daily_kp_target=3):
+    today = datetime.now().date()
+
+    if isinstance(exam_date, str):
+        exam_date_obj = datetime.strptime(exam_date, '%Y-%m-%d').date()
+    else:
+        exam_date_obj = exam_date
+
+    total_days = days_until_exam(exam_date_obj)
+    if total_days <= 0:
+        total_days = 30
+
+    cursor.execute('''
+        SELECT kp.id, kp.name, kp.category, kp.exam_weight, kp.difficulty,
+               COALESCE(uc.mastery_score, 0.5) as mastery_score
+        FROM knowledge_points kp
+        LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+        WHERE kp.is_active = 1 AND kp.level = 3
+        ORDER BY (1 - COALESCE(uc.mastery_score, 0.5)) * kp.exam_weight DESC, kp.sort_order ASC
+    ''', (user_id,))
+    kps = [dict(row) for row in cursor.fetchall()]
+
+    cursor.execute('SELECT id FROM study_plans WHERE user_id = ? AND status = "active"', (user_id,))
+    existing = cursor.fetchone()
+
+    if existing:
+        plan_id = existing['id']
+        cursor.execute('''
+            UPDATE study_plans 
+            SET exam_date = ?, daily_target = ?, daily_kp_target = ?, updated_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (exam_date_obj.strftime('%Y-%m-%d'), daily_target, daily_kp_target, plan_id))
+        cursor.execute('DELETE FROM daily_tasks WHERE plan_id = ? AND task_date >= DATE("now")', (plan_id,))
+    else:
+        cursor.execute('''
+            INSERT INTO study_plans (user_id, exam_date, daily_target, daily_kp_target, start_date, status)
+            VALUES (?, ?, ?, ?, DATE("now"), 'active')
+        ''', (user_id, exam_date_obj.strftime('%Y-%m-%d'), daily_target, daily_kp_target))
+        plan_id = cursor.lastrowid
+
+    tasks = calculate_daily_tasks(cursor, user_id, plan_id, today, kps, daily_kp_target, daily_target)
+
+    for task in tasks:
+        cursor.execute('''
+            INSERT INTO daily_tasks (plan_id, user_id, task_date, task_type, kp_id, question_count, completed_count, status)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            task['plan_id'], task['user_id'], task['task_date'], task['task_type'],
+            task['kp_id'], task['question_count'], task['completed_count'], task['status']
+        ))
+
+    return plan_id
+
 
 def _format_question(row):
     return {
@@ -1105,6 +2216,1269 @@ def get_repractice_conversion():
         'numerator_users': numerator,
         'conversion_rate': rate
     })
+
+
+@app.route('/api/knowledge/tree', methods=['GET'])
+@api_response
+def get_knowledge_tree():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT kp.*, uc.mastery_score
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            WHERE kp.is_active = 1
+            ORDER BY kp.level ASC, kp.sort_order ASC, kp.id ASC
+        ''', (user_id,))
+        rows = cursor.fetchall()
+        
+        mastery_map = {}
+        for row in rows:
+            if row["mastery_score"] is not None:
+                mastery_map[row["id"]] = row["mastery_score"]
+        
+        tree = build_knowledge_tree(rows, mastery_map)
+    return jsonify({'tree': tree})
+
+
+@app.route('/api/knowledge/<int:kp_id>', methods=['GET'])
+@api_response
+def get_knowledge_point(kp_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM knowledge_points WHERE id = ?', (kp_id,))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Knowledge point not found'}), 404
+        
+        mastery_score = get_kp_mastery(cursor, kp_id, user_id)
+        
+        cursor.execute('''
+            SELECT COUNT(*) as wrong_count
+            FROM wrong_questions wq
+            JOIN question_mapping qm ON wq.id = qm.question_id
+            WHERE qm.kp_id = ? AND wq.user_id = ?
+        ''', (kp_id, user_id))
+        wrong_count_row = cursor.fetchone()
+        wrong_count = wrong_count_row["wrong_count"] if wrong_count_row else 0
+        
+        result = {
+            'id': row['id'],
+            'name': row['name'],
+            'category': row['category'] if 'category' in row.keys() else None,
+            'level': row['level'] if 'level' in row.keys() else 1,
+            'parent_id': row['parent_id'] if 'parent_id' in row.keys() else None,
+            'sort_order': row['sort_order'] if 'sort_order' in row.keys() else 0,
+            'exam_weight': row['exam_weight'] if 'exam_weight' in row.keys() else 0,
+            'difficulty': row['difficulty'] if 'difficulty' in row.keys() else 0.5,
+            'is_active': row['is_active'] if 'is_active' in row.keys() else 1,
+            'mastery_score': mastery_score,
+            'wrong_question_count': wrong_count
+        }
+    return jsonify(result)
+
+
+@app.route('/api/knowledge/weakest', methods=['GET'])
+@api_response
+def get_weakest_knowledge():
+    limit = request.args.get('limit', 10, type=int)
+    limit = min(max(1, limit), 100)
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT kp.*, 
+                   COALESCE(uc.mastery_score, 0.5) as mastery_score
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            WHERE kp.is_active = 1 AND kp.level = 3
+            ORDER BY mastery_score ASC, kp.sort_order ASC
+            LIMIT ?
+        ''', (user_id, limit))
+        rows = cursor.fetchall()
+        
+        result = []
+        for row in rows:
+            result.append({
+                'id': row['id'],
+                'name': row['name'],
+                'category': row['category'] if 'category' in row.keys() else None,
+                'level': row['level'] if 'level' in row.keys() else 1,
+                'mastery_score': row['mastery_score'],
+                'exam_weight': row['exam_weight'] if 'exam_weight' in row.keys() else 0,
+                'difficulty': row['difficulty'] if 'difficulty' in row.keys() else 0.5
+            })
+    return jsonify({'weak_points': result})
+
+
+@app.route('/api/knowledge/progress', methods=['GET'])
+@api_response
+def get_knowledge_progress():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                kp1.id as chapter_id,
+                kp1.name as chapter_name,
+                kp1.sort_order as chapter_order,
+                kp2.id as section_id,
+                kp2.name as section_name,
+                kp2.sort_order as section_order,
+                COUNT(kp3.id) as kp_total,
+                AVG(COALESCE(uc.mastery_score, 0.5)) as avg_mastery
+            FROM knowledge_points kp1
+            LEFT JOIN knowledge_points kp2 ON kp2.parent_id = kp1.id AND kp2.level = 2 AND kp2.is_active = 1
+            LEFT JOIN knowledge_points kp3 ON kp3.parent_id = kp2.id AND kp3.level = 3 AND kp3.is_active = 1
+            LEFT JOIN user_cognition uc ON kp3.id = uc.kp_id AND uc.user_id = ?
+            WHERE kp1.level = 1 AND kp1.is_active = 1
+            GROUP BY kp1.id, kp1.name, kp1.sort_order, kp2.id, kp2.name, kp2.sort_order
+            ORDER BY kp1.sort_order ASC, kp2.sort_order ASC
+        ''', (user_id,))
+        rows = cursor.fetchall()
+        
+        chapters = {}
+        for row in rows:
+            ch_id = row['chapter_id']
+            if ch_id not in chapters:
+                chapters[ch_id] = {
+                    'id': ch_id,
+                    'name': row['chapter_name'],
+                    'sort_order': row['chapter_order'],
+                    'sections': [],
+                    'total_kps': 0,
+                    'avg_mastery': 0.0
+                }
+            
+            if row['section_id']:
+                section = {
+                    'id': row['section_id'],
+                    'name': row['section_name'],
+                    'sort_order': row['section_order'],
+                    'kp_total': row['kp_total'] or 0,
+                    'avg_mastery': round(row['avg_mastery'] or 0.5, 4)
+                }
+                chapters[ch_id]['sections'].append(section)
+        
+        result = []
+        for ch_id in sorted(chapters.keys(), key=lambda x: chapters[x]['sort_order']):
+            ch = chapters[ch_id]
+            total_kps = sum(s['kp_total'] for s in ch['sections'])
+            if total_kps > 0:
+                weighted_sum = sum(s['avg_mastery'] * s['kp_total'] for s in ch['sections'])
+                ch_avg = round(weighted_sum / total_kps, 4)
+            else:
+                ch_avg = 0.5
+            ch['total_kps'] = total_kps
+            ch['avg_mastery'] = ch_avg
+            result.append(ch)
+    
+    return jsonify({'progress': result})
+
+
+@app.route('/api/study-plan', methods=['POST'])
+@api_response
+def create_or_update_study_plan():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    exam_date = data.get('exam_date')
+    daily_target = safe_int(data.get('daily_target', 20), 20)
+    daily_kp_target = safe_int(data.get('daily_kp_target', 3), 3)
+
+    if not exam_date:
+        return jsonify({'error': 'exam_date is required'}), 400
+
+    daily_target = max(5, min(100, daily_target))
+    daily_kp_target = max(1, min(10, daily_kp_target))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        plan_id = generate_study_plan(cursor, user_id, exam_date, daily_target, daily_kp_target)
+        conn.commit()
+
+        cursor.execute('SELECT * FROM study_plans WHERE id = ?', (plan_id,))
+        plan = cursor.fetchone()
+
+        cursor.execute('SELECT COUNT(*) FROM daily_tasks WHERE plan_id = ?', (plan_id,))
+        total_tasks = cursor.fetchone()[0]
+
+    return jsonify({
+        'success': True,
+        'plan': dict(plan),
+        'total_tasks_generated': total_tasks
+    })
+
+
+@app.route('/api/study-plan', methods=['GET'])
+@api_response
+def get_study_plan():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM study_plans WHERE user_id = ? AND status = "active"', (user_id,))
+        plan = cursor.fetchone()
+
+        if not plan:
+            return jsonify({'plan': None, 'today_tasks': [], 'week_overview': []})
+
+        cursor.execute('''
+            SELECT * FROM daily_tasks 
+            WHERE user_id = ? AND task_date = DATE("now")
+            ORDER BY task_type, id
+        ''', (user_id,))
+        today_tasks = [get_task_detail(cursor, t) for t in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT task_date, 
+                   COUNT(*) as total_tasks,
+                   SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks
+            FROM daily_tasks
+            WHERE user_id = ? AND task_date >= DATE("now") AND task_date < DATE("now", "+7 day")
+            GROUP BY task_date
+            ORDER BY task_date
+        ''', (user_id,))
+        week_overview = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({
+        'plan': dict(plan),
+        'today_tasks': today_tasks,
+        'week_overview': week_overview
+    })
+
+
+@app.route('/api/study-plan/today', methods=['GET'])
+@api_response
+def get_today_tasks():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('''
+            SELECT * FROM daily_tasks 
+            WHERE user_id = ? AND task_date = DATE("now")
+            ORDER BY 
+                CASE task_type 
+                    WHEN 'learn' THEN 1 
+                    WHEN 'review' THEN 2 
+                    WHEN 'practice' THEN 3 
+                    ELSE 4 
+                END,
+                id
+        ''', (user_id,))
+        tasks = [get_task_detail(cursor, t) for t in cursor.fetchall()]
+
+        total_questions = sum(t['question_count'] for t in tasks)
+        completed_questions = sum(t['completed_count'] for t in tasks)
+        completed_tasks = sum(1 for t in tasks if t['status'] == 'completed')
+
+    return jsonify({
+        'tasks': tasks,
+        'stats': {
+            'total_tasks': len(tasks),
+            'completed_tasks': completed_tasks,
+            'total_questions': total_questions,
+            'completed_questions': completed_questions,
+            'progress': round((completed_questions / total_questions * 100), 2) if total_questions > 0 else 0
+        }
+    })
+
+
+@app.route('/api/study-plan/tasks/<int:task_id>/complete', methods=['POST'])
+@api_response
+def complete_task(task_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    completed_count = data.get('completed_count')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM daily_tasks WHERE id = ? AND user_id = ?', (task_id, user_id))
+        task = cursor.fetchone()
+
+        if not task:
+            return jsonify({'error': 'Task not found'}), 404
+
+        if completed_count is None:
+            new_completed = task['question_count']
+        else:
+            new_completed = min(task['question_count'], max(0, safe_int(completed_count, 0)))
+
+        new_status = 'completed' if new_completed >= task['question_count'] else 'in_progress'
+        if new_completed == 0:
+            new_status = 'pending'
+
+        cursor.execute('''
+            UPDATE daily_tasks 
+            SET completed_count = ?, status = ?
+            WHERE id = ?
+        ''', (new_completed, new_status, task_id))
+        conn.commit()
+
+        cursor.execute('SELECT * FROM daily_tasks WHERE id = ?', (task_id,))
+        updated_task = get_task_detail(cursor, cursor.fetchone())
+
+    return jsonify({
+        'success': True,
+        'task': updated_task
+    })
+
+
+@app.route('/api/study-plan/overview', methods=['GET'])
+@api_response
+def get_study_plan_overview():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM study_plans WHERE user_id = ? AND status = "active"', (user_id,))
+        plan = cursor.fetchone()
+
+        if not plan:
+            return jsonify({'error': 'No active study plan'}), 404
+
+        days_left = days_until_exam(plan['exam_date'])
+
+        cursor.execute('''
+            SELECT 
+                COUNT(*) as total_tasks,
+                SUM(CASE WHEN status = 'completed' THEN 1 ELSE 0 END) as completed_tasks,
+                SUM(question_count) as total_questions,
+                SUM(completed_count) as completed_questions,
+                COUNT(DISTINCT task_date) as total_days,
+                COUNT(DISTINCT CASE WHEN status = 'completed' THEN task_date END) as completed_days
+            FROM daily_tasks 
+            WHERE plan_id = ?
+        ''', (plan['id'],))
+        stats = cursor.fetchone()
+
+        cursor.execute('''
+            SELECT 
+                kp1.name as chapter_name,
+                COUNT(DISTINCT dt.kp_id) as total_kps,
+                COUNT(DISTINCT CASE WHEN dt.status = 'completed' THEN dt.kp_id END) as completed_kps
+            FROM daily_tasks dt
+            LEFT JOIN knowledge_points kp3 ON dt.kp_id = kp3.id
+            LEFT JOIN knowledge_points kp2 ON kp3.parent_id = kp2.id
+            LEFT JOIN knowledge_points kp1 ON kp2.parent_id = kp1.id
+            WHERE dt.plan_id = ? AND dt.task_type = 'learn' AND kp1.id IS NOT NULL
+            GROUP BY kp1.id, kp1.name
+            ORDER BY kp1.sort_order
+        ''', (plan['id'],))
+        chapter_progress = []
+        for row in cursor.fetchall():
+            total = row['total_kps'] or 0
+            completed = row['completed_kps'] or 0
+            chapter_progress.append({
+                'chapter_name': row['chapter_name'],
+                'total_kps': total,
+                'completed_kps': completed,
+                'progress': round((completed / total * 100), 2) if total > 0 else 0
+            })
+
+    total_tasks = stats['total_tasks'] or 0
+    completed_tasks = stats['completed_tasks'] or 0
+
+    return jsonify({
+        'plan': dict(plan),
+        'days_until_exam': days_left,
+        'total_progress': round((completed_tasks / total_tasks * 100), 2) if total_tasks > 0 else 0,
+        'completed_days': stats['completed_days'] or 0,
+        'total_days': stats['total_days'] or 0,
+        'total_tasks': total_tasks,
+        'completed_tasks': completed_tasks,
+        'total_questions': stats['total_questions'] or 0,
+        'completed_questions': stats['completed_questions'] or 0,
+        'chapter_progress': chapter_progress
+    })
+
+
+@app.route('/api/study-plan/regenerate', methods=['POST'])
+@api_response
+def regenerate_study_plan():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM study_plans WHERE user_id = ? AND status = "active"', (user_id,))
+        plan = cursor.fetchone()
+
+        if not plan:
+            return jsonify({'error': 'No active study plan'}), 404
+
+        plan_id = generate_study_plan(
+            cursor, user_id, plan['exam_date'],
+            plan['daily_target'], plan['daily_kp_target']
+        )
+        conn.commit()
+
+        cursor.execute('SELECT * FROM study_plans WHERE id = ?', (plan_id,))
+        updated_plan = cursor.fetchone()
+
+        cursor.execute('SELECT COUNT(*) FROM daily_tasks WHERE plan_id = ?', (plan_id,))
+        total_tasks = cursor.fetchone()[0]
+
+    return jsonify({
+        'success': True,
+        'plan': dict(updated_plan),
+        'total_tasks': total_tasks,
+        'message': 'Study plan regenerated based on latest mastery data'
+    })
+
+
+@app.route('/api/mock-exam/create', methods=['POST'])
+@api_response
+def create_mock_exam():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    title = data.get('title', '模拟考试')
+    exam_type = data.get('exam_type', 'custom')
+    question_count = safe_int(data.get('question_count', 20), 20)
+    duration_minutes = safe_int(data.get('duration_minutes', 150), 150)
+    kp_ids = data.get('kp_ids')
+
+    question_count = max(5, min(100, question_count))
+    duration_minutes = max(10, min(300, duration_minutes))
+
+    if exam_type not in ['full', 'chapter', 'custom']:
+        exam_type = 'custom'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        questions = generate_exam_questions(cursor, user_id, exam_type, question_count, kp_ids)
+
+        cursor.execute('''
+            INSERT INTO mock_exams (
+                user_id, title, exam_type, total_questions, 
+                duration_minutes, status
+            ) VALUES (?, ?, ?, ?, ?, 'draft')
+        ''', (user_id, title, exam_type, len(questions), duration_minutes))
+        exam_id = cursor.lastrowid
+
+        for idx, q in enumerate(questions):
+            cursor.execute('''
+                INSERT INTO mock_exam_questions (
+                    exam_id, question_id, question_text, question_type,
+                    options, correct_answer, order_index, kp_id, explanation
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                exam_id,
+                q['id'],
+                q['question_text'],
+                q['question_type'],
+                json.dumps(q['options'], ensure_ascii=False),
+                q['correct_answer'],
+                idx,
+                q.get('kp_id'),
+                q.get('explanation', '')
+            ))
+
+        conn.commit()
+
+    return jsonify({
+        'success': True,
+        'exam_id': exam_id,
+        'total_questions': len(questions)
+    })
+
+
+@app.route('/api/mock-exam/<int:exam_id>', methods=['GET'])
+@api_response
+def get_mock_exam(exam_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ? AND user_id = ?', (exam_id, user_id))
+        exam = cursor.fetchone()
+        if not exam:
+            return jsonify({'error': 'Exam not found'}), 404
+
+        cursor.execute('''
+            SELECT id, exam_id, question_id, question_text, question_type,
+                   options, user_answer, is_correct, order_index, kp_id
+            FROM mock_exam_questions 
+            WHERE exam_id = ? 
+            ORDER BY order_index ASC
+        ''', (exam_id,))
+        
+        questions = []
+        for row in cursor.fetchall():
+            q = dict(row)
+            q['options'] = json.loads(q['options']) if q['options'] else []
+            if exam['status'] != 'submitted':
+                q.pop('correct_answer', None)
+                if 'explanation' in q:
+                    q.pop('explanation', None)
+            questions.append(q)
+
+        exam_dict = dict(exam)
+
+    return jsonify({
+        'exam': exam_dict,
+        'questions': questions
+    })
+
+
+@app.route('/api/mock-exam/<int:exam_id>/start', methods=['POST'])
+@api_response
+def start_mock_exam(exam_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ? AND user_id = ?', (exam_id, user_id))
+        exam = cursor.fetchone()
+        if not exam:
+            return jsonify({'error': 'Exam not found'}), 404
+
+        if exam['status'] not in ['draft']:
+            return jsonify({'error': 'Exam already started or submitted'}), 400
+
+        cursor.execute('''
+            UPDATE mock_exams 
+            SET status = 'in_progress', started_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (exam_id,))
+        conn.commit()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ?', (exam_id,))
+        updated_exam = cursor.fetchone()
+
+    return jsonify({
+        'success': True,
+        'exam': dict(updated_exam)
+    })
+
+
+@app.route('/api/mock-exam/<int:exam_id>/answer', methods=['POST'])
+@api_response
+def answer_mock_exam(exam_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    question_index = safe_int(data.get('question_index'), 0)
+    user_answer = data.get('user_answer', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ? AND user_id = ?', (exam_id, user_id))
+        exam = cursor.fetchone()
+        if not exam:
+            return jsonify({'error': 'Exam not found'}), 404
+
+        if exam['status'] != 'in_progress':
+            return jsonify({'error': 'Exam not in progress'}), 400
+
+        cursor.execute('''
+            SELECT id FROM mock_exam_questions 
+            WHERE exam_id = ? AND order_index = ?
+        ''', (exam_id, question_index))
+        question = cursor.fetchone()
+        if not question:
+            return jsonify({'error': 'Question not found'}), 404
+
+        cursor.execute('''
+            UPDATE mock_exam_questions 
+            SET user_answer = ?
+            WHERE exam_id = ? AND order_index = ?
+        ''', (user_answer, exam_id, question_index))
+        conn.commit()
+
+    return jsonify({
+        'success': True,
+        'question_index': question_index,
+        'user_answer': user_answer
+    })
+
+
+@app.route('/api/mock-exam/<int:exam_id>/submit', methods=['POST'])
+@api_response
+def submit_mock_exam(exam_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ? AND user_id = ?', (exam_id, user_id))
+        exam = cursor.fetchone()
+        if not exam:
+            return jsonify({'error': 'Exam not found'}), 404
+
+        if exam['status'] == 'submitted':
+            return jsonify({'error': 'Exam already submitted'}), 400
+
+        cursor.execute('''
+            SELECT * FROM mock_exam_questions 
+            WHERE exam_id = ? 
+            ORDER BY order_index ASC
+        ''', (exam_id,))
+        questions = cursor.fetchall()
+
+        correct_count = 0
+        wrong_count = 0
+        kp_stats = {}
+
+        for q in questions:
+            user_ans = q['user_answer'] or ''
+            correct_ans = q['correct_answer'] or ''
+            is_correct = 1 if (user_ans.strip() == correct_ans.strip() and user_ans != '') else 0
+
+            cursor.execute('''
+                UPDATE mock_exam_questions 
+                SET is_correct = ?
+                WHERE id = ?
+            ''', (is_correct, q['id']))
+
+            if is_correct:
+                correct_count += 1
+            else:
+                wrong_count += 1
+
+            kp_id = q['kp_id']
+            if kp_id:
+                if kp_id not in kp_stats:
+                    kp_stats[kp_id] = {'total': 0, 'correct': 0}
+                kp_stats[kp_id]['total'] += 1
+                if is_correct:
+                    kp_stats[kp_id]['correct'] += 1
+
+            if not is_correct and user_ans:
+                cursor.execute('''
+                    SELECT id FROM wrong_questions 
+                    WHERE question = ? AND user_id = ?
+                ''', (q['question_text'], user_id))
+                existing = cursor.fetchone()
+                if existing:
+                    cursor.execute('''
+                        UPDATE wrong_questions 
+                        SET wrong_count = wrong_count + 1,
+                            user_answer = ?,
+                            is_mastered = 0
+                        WHERE id = ?
+                    ''', (user_ans, existing['id']))
+                else:
+                    options_json = q['options'] if q['options'] else '[]'
+                    cursor.execute('''
+                        INSERT INTO wrong_questions (
+                            question_id, question, options, user_answer, 
+                            correct_answer, analysis, user_id, wrong_count
+                        ) VALUES (?, ?, ?, ?, ?, ?, ?, 1)
+                    ''', (
+                        f'mock_{q["id"]}',
+                        q['question_text'],
+                        options_json,
+                        user_ans,
+                        correct_ans,
+                        q['explanation'] or '',
+                        user_id
+                    ))
+
+        total_questions = len(questions)
+        score = round((correct_count / total_questions) * 100, 2) if total_questions > 0 else 0
+
+        time_spent = 0
+        if exam['started_at']:
+            started = datetime.strptime(exam['started_at'], '%Y-%m-%d %H:%M:%S')
+            now = datetime.now()
+            time_spent = int((now - started).total_seconds())
+
+        cursor.execute('''
+            UPDATE mock_exams 
+            SET status = 'submitted', 
+                score = ?, 
+                correct_count = ?, 
+                wrong_count = ?,
+                submitted_at = CURRENT_TIMESTAMP,
+                time_spent = ?
+            WHERE id = ?
+        ''', (score, correct_count, wrong_count, time_spent, exam_id))
+
+        for kp_id, stats in kp_stats.items():
+            if stats['total'] > 0:
+                result = stats['correct'] == stats['total']
+                update_cognition(cursor, kp_id, result, None, user_id)
+
+        conn.commit()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ?', (exam_id,))
+        updated_exam = cursor.fetchone()
+
+    return jsonify({
+        'success': True,
+        'exam': dict(updated_exam),
+        'correct_count': correct_count,
+        'wrong_count': wrong_count,
+        'score': score
+    })
+
+
+@app.route('/api/mock-exam/<int:exam_id>/result', methods=['GET'])
+@api_response
+def get_mock_exam_result(exam_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT * FROM mock_exams WHERE id = ? AND user_id = ?', (exam_id, user_id))
+        exam = cursor.fetchone()
+        if not exam:
+            return jsonify({'error': 'Exam not found'}), 404
+
+        if exam['status'] != 'submitted':
+            return jsonify({'error': 'Exam not submitted yet'}), 400
+
+        cursor.execute('''
+            SELECT * FROM mock_exam_questions 
+            WHERE exam_id = ? 
+            ORDER BY order_index ASC
+        ''', (exam_id,))
+        
+        questions = []
+        kp_stats = {}
+        for row in cursor.fetchall():
+            q = dict(row)
+            q['options'] = json.loads(q['options']) if q['options'] else []
+            questions.append(q)
+
+            kp_id = q['kp_id']
+            if kp_id:
+                if kp_id not in kp_stats:
+                    kp_stats[kp_id] = {'total': 0, 'correct': 0, 'kp_name': ''}
+                kp_stats[kp_id]['total'] += 1
+                if q['is_correct']:
+                    kp_stats[kp_id]['correct'] += 1
+
+        for kp_id in kp_stats:
+            cursor.execute('SELECT name FROM knowledge_points WHERE id = ?', (kp_id,))
+            kp_row = cursor.fetchone()
+            if kp_row:
+                kp_stats[kp_id]['kp_name'] = kp_row['name']
+
+        kp_accuracy = []
+        for kp_id, stats in kp_stats.items():
+            accuracy = round((stats['correct'] / stats['total']) * 100, 2) if stats['total'] > 0 else 0
+            kp_accuracy.append({
+                'kp_id': kp_id,
+                'kp_name': stats['kp_name'],
+                'total': stats['total'],
+                'correct': stats['correct'],
+                'accuracy': accuracy
+            })
+
+    return jsonify({
+        'exam': dict(exam),
+        'questions': questions,
+        'kp_accuracy': kp_accuracy,
+        'correct_count': exam['correct_count'],
+        'wrong_count': exam['wrong_count'],
+        'score': exam['score']
+    })
+
+
+@app.route('/api/mock-exam/list', methods=['GET'])
+@api_response
+def get_mock_exam_list():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT COUNT(*) FROM mock_exams WHERE user_id = ?', (user_id,))
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute('''
+            SELECT * FROM mock_exams 
+            WHERE user_id = ? 
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        ''', (user_id, limit, offset))
+
+        exams = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({
+        'items': exams,
+        'total': total,
+        'page': page,
+        'limit': limit
+    })
+
+
+@app.route('/api/mock-exam/stats', methods=['GET'])
+@api_response
+def get_mock_exam_stats():
+    user_id = get_user_id()
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute('SELECT COUNT(*) FROM mock_exams WHERE user_id = ?', (user_id,))
+        total_exams = cursor.fetchone()[0]
+
+        cursor.execute('''
+            SELECT AVG(score) as avg_score, MAX(score) as max_score
+            FROM mock_exams 
+            WHERE user_id = ? AND status = 'submitted'
+        ''', (user_id,))
+        score_row = cursor.fetchone()
+        avg_score = round(score_row['avg_score'], 2) if score_row['avg_score'] is not None else 0
+        max_score = round(score_row['max_score'], 2) if score_row['max_score'] is not None else 0
+
+        cursor.execute('''
+            SELECT DATE(created_at) as date, COUNT(*) as count, AVG(score) as avg_score
+            FROM mock_exams
+            WHERE user_id = ? AND status = 'submitted'
+            GROUP BY DATE(created_at)
+            ORDER BY date DESC
+            LIMIT 10
+        ''', (user_id,))
+        
+        recent_trend = []
+        for row in cursor.fetchall():
+            recent_trend.append({
+                'date': row['date'],
+                'count': row['count'],
+                'avg_score': round(row['avg_score'], 2) if row['avg_score'] is not None else 0
+            })
+
+    return jsonify({
+        'total_exams': total_exams,
+        'avg_score': avg_score,
+        'max_score': max_score,
+        'recent_trend': recent_trend
+    })
+
+
+@app.route('/api/error-analysis/analyze/<int:question_id>', methods=['POST'])
+@api_response
+def analyze_single_question(question_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM wrong_questions WHERE id = ? AND user_id = ?', (question_id, user_id))
+        question = cursor.fetchone()
+        if not question:
+            return jsonify({'error': 'Question not found'}), 404
+        
+        tags = auto_analyze_error(
+            cursor,
+            question_id,
+            question['question'],
+            question['user_answer'],
+            question['correct_answer']
+        )
+        
+        cursor.execute('DELETE FROM question_error_tags WHERE question_id = ?', (question_id,))
+        
+        for tag_id, confidence in tags:
+            cursor.execute('''
+                INSERT OR IGNORE INTO question_error_tags (question_id, tag_id, confidence)
+                VALUES (?, ?, ?)
+            ''', (question_id, tag_id, confidence))
+        
+        cursor.execute('''
+            UPDATE wrong_questions 
+            SET last_error_at = CURRENT_TIMESTAMP
+            WHERE id = ?
+        ''', (question_id,))
+        
+        conn.commit()
+        
+        cursor.execute('''
+            SELECT et.id, et.name, et.category, et.description, qet.confidence
+            FROM error_tags et
+            JOIN question_error_tags qet ON et.id = qet.tag_id
+            WHERE qet.question_id = ?
+            ORDER BY qet.confidence DESC
+        ''', (question_id,))
+        result_tags = [dict(row) for row in cursor.fetchall()]
+    
+    return jsonify({
+        'success': True,
+        'question_id': question_id,
+        'tags': result_tags
+    })
+
+
+@app.route('/api/error-analysis/batch-analyze', methods=['POST'])
+@api_response
+def batch_analyze_questions():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT wq.id, wq.question, wq.user_answer, wq.correct_answer
+            FROM wrong_questions wq
+            LEFT JOIN question_error_tags qet ON wq.id = qet.question_id
+            WHERE wq.user_id = ?
+            AND qet.id IS NULL
+        ''', (user_id,))
+        questions = cursor.fetchall()
+        
+        analyzed_count = 0
+        for q in questions:
+            tags = auto_analyze_error(
+                cursor,
+                q['id'],
+                q['question'],
+                q['user_answer'],
+                q['correct_answer']
+            )
+            
+            for tag_id, confidence in tags:
+                cursor.execute('''
+                    INSERT OR IGNORE INTO question_error_tags (question_id, tag_id, confidence)
+                    VALUES (?, ?, ?)
+                ''', (q['id'], tag_id, confidence))
+            
+            cursor.execute('''
+                UPDATE wrong_questions 
+                SET last_error_at = CURRENT_TIMESTAMP
+                WHERE id = ?
+            ''', (q['id'],))
+            
+            analyzed_count += 1
+        
+        conn.commit()
+        
+        cursor.execute('''
+            SELECT COUNT(*) as total
+            FROM wrong_questions 
+            WHERE user_id = ?
+        ''', (user_id,))
+        total_count = cursor.fetchone()['total']
+        
+        cursor.execute('''
+            SELECT COUNT(DISTINCT wq.id) as analyzed
+            FROM wrong_questions wq
+            JOIN question_error_tags qet ON wq.id = qet.question_id
+            WHERE wq.user_id = ?
+        ''', (user_id,))
+        already_analyzed = cursor.fetchone()['analyzed']
+    
+    return jsonify({
+        'success': True,
+        'newly_analyzed': analyzed_count,
+        'already_analyzed': already_analyzed,
+        'total_questions': total_count,
+        'unanalyzed': total_count - already_analyzed
+    })
+
+
+@app.route('/api/error-analysis/tags', methods=['GET'])
+@api_response
+def get_error_tags():
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, name, category, description, created_at
+            FROM error_tags
+            ORDER BY category, id
+        ''')
+        all_tags = [dict(row) for row in cursor.fetchall()]
+        
+        tags_by_category = defaultdict(list)
+        for tag in all_tags:
+            tags_by_category[tag['category']].append(tag)
+        
+        category_names = {
+            'concept': '概念类',
+            'memory': '记忆类',
+            'calculation': '计算类',
+            'reading': '审题类',
+            'logic': '逻辑类'
+        }
+        
+        result = []
+        for cat_key, cat_name in category_names.items():
+            if cat_key in tags_by_category:
+                result.append({
+                    'category': cat_key,
+                    'category_name': cat_name,
+                    'tags': tags_by_category[cat_key]
+                })
+    
+    return jsonify({'categories': result, 'all_tags': all_tags})
+
+
+@app.route('/api/error-analysis/distribution', methods=['GET'])
+@api_response
+def get_error_distribution():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('''
+            SELECT 
+                et.category,
+                COUNT(DISTINCT qet.question_id) as count,
+                COUNT(*) as tag_count
+            FROM error_tags et
+            JOIN question_error_tags qet ON et.id = qet.tag_id
+            JOIN wrong_questions wq ON qet.question_id = wq.id
+            WHERE wq.user_id = ?
+            GROUP BY et.category
+            ORDER BY count DESC
+        ''', (user_id,))
+        category_stats = [dict(row) for row in cursor.fetchall()]
+        
+        cursor.execute('''
+            SELECT 
+                et.id, et.name, et.category, et.description,
+                COUNT(qet.question_id) as error_count
+            FROM error_tags et
+            LEFT JOIN question_error_tags qet ON et.id = qet.tag_id
+            LEFT JOIN wrong_questions wq ON qet.question_id = wq.id AND wq.user_id = ?
+            GROUP BY et.id, et.name, et.category, et.description
+            ORDER BY error_count DESC
+        ''', (user_id,))
+        tag_stats = [dict(row) for row in cursor.fetchall()]
+        
+        category_names = {
+            'concept': '概念类',
+            'memory': '记忆类',
+            'calculation': '计算类',
+            'reading': '审题类',
+            'logic': '逻辑类'
+        }
+        
+        pie_data = []
+        total_errors = sum(s['count'] for s in category_stats)
+        for stat in category_stats:
+            percentage = round((stat['count'] / total_errors * 100), 2) if total_errors > 0 else 0
+            pie_data.append({
+                'category': stat['category'],
+                'category_name': category_names.get(stat['category'], stat['category']),
+                'count': stat['count'],
+                'percentage': percentage
+            })
+    
+    return jsonify({
+        'pie_data': pie_data,
+        'tag_stats': tag_stats,
+        'total_errors': total_errors
+    })
+
+
+@app.route('/api/error-analysis/trend', methods=['GET'])
+@api_response
+def get_error_trend():
+    user_id = get_user_id()
+    days = request.args.get('days', 30, type=int)
+    days = max(7, min(90, days))
+    
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute(f'''
+            SELECT 
+                DATE(wq.created_at) as date,
+                COUNT(*) as total_errors
+            FROM wrong_questions wq
+            WHERE wq.user_id = ?
+            AND wq.created_at >= datetime('now', ?)
+            GROUP BY DATE(wq.created_at)
+            ORDER BY date ASC
+        ''', (user_id, f'-{days} day'))
+        daily_errors = [dict(row) for row in cursor.fetchall()]
+        
+        date_map = {row['date']: row for row in daily_errors}
+        trend_data = []
+        for i in range(days - 1, -1, -1):
+            date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+            if date in date_map:
+                trend_data.append({
+                    'date': date,
+                    'total_errors': date_map[date]['total_errors']
+                })
+            else:
+                trend_data.append({
+                    'date': date,
+                    'total_errors': 0
+                })
+        
+        cursor.execute('''
+            SELECT 
+                et.category,
+                DATE(wq.created_at) as date,
+                COUNT(DISTINCT wq.id) as count
+            FROM error_tags et
+            JOIN question_error_tags qet ON et.id = qet.tag_id
+            JOIN wrong_questions wq ON qet.question_id = wq.id
+            WHERE wq.user_id = ?
+            AND wq.created_at >= datetime('now', ?)
+            GROUP BY et.category, DATE(wq.created_at)
+            ORDER BY date ASC
+        ''', (user_id, f'-{days} day'))
+        category_daily = cursor.fetchall()
+        
+        category_trend = defaultdict(lambda: defaultdict(int))
+        for row in category_daily:
+            category_trend[row['category']][row['date']] = row['count']
+        
+        category_names = {
+            'concept': '概念类',
+            'memory': '记忆类',
+            'calculation': '计算类',
+            'reading': '审题类',
+            'logic': '逻辑类'
+        }
+        
+        category_trend_list = []
+        for cat_key, cat_name in category_names.items():
+            cat_data = []
+            for i in range(days - 1, -1, -1):
+                date = (datetime.now() - timedelta(days=i)).strftime('%Y-%m-%d')
+                cat_data.append({
+                    'date': date,
+                    'count': category_trend[cat_key].get(date, 0)
+                })
+            category_trend_list.append({
+                'category': cat_key,
+                'category_name': cat_name,
+                'data': cat_data
+            })
+    
+    return jsonify({
+        'days': days,
+        'daily_trend': trend_data,
+        'category_trend': category_trend_list
+    })
+
+
+@app.route('/api/error-analysis/recommendations', methods=['GET'])
+@api_response
+def get_recommendations():
+    user_id = get_user_id()
+    limit = request.args.get('limit', 10, type=int)
+    limit = max(1, min(50, limit))
+    
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        result = generate_recommendations(cursor, user_id, limit)
+    
+    return jsonify(result)
+
+
+@app.route('/api/error-analysis/questions/<int:question_id>/tags', methods=['POST'])
+@api_response
+def update_question_tags(question_id):
+    user_id = get_user_id()
+    data = request.get_json() or {}
+    tag_ids = data.get('tag_ids', [])
+    
+    if not isinstance(tag_ids, list):
+        return jsonify({'error': 'tag_ids must be a list'}), 400
+    
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT id FROM wrong_questions WHERE id = ? AND user_id = ?', (question_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Question not found'}), 404
+        
+        cursor.execute('DELETE FROM question_error_tags WHERE question_id = ?', (question_id,))
+        
+        for tag_id in tag_ids:
+            try:
+                tag_id_int = int(tag_id)
+                cursor.execute('SELECT id FROM error_tags WHERE id = ?', (tag_id_int,))
+                if cursor.fetchone():
+                    cursor.execute('''
+                        INSERT OR IGNORE INTO question_error_tags (question_id, tag_id, confidence)
+                        VALUES (?, ?, 1.0)
+                    ''', (question_id, tag_id_int))
+            except (ValueError, TypeError):
+                continue
+        
+        conn.commit()
+        
+        cursor.execute('''
+            SELECT et.id, et.name, et.category, et.description, qet.confidence
+            FROM error_tags et
+            JOIN question_error_tags qet ON et.id = qet.tag_id
+            WHERE qet.question_id = ?
+            ORDER BY qet.confidence DESC
+        ''', (question_id,))
+        result_tags = [dict(row) for row in cursor.fetchall()]
+    
+    return jsonify({
+        'success': True,
+        'question_id': question_id,
+        'tags': result_tags
+    })
+
+
+@app.route('/api/error-analysis/questions/<int:question_id>', methods=['GET'])
+@api_response
+def get_question_analysis(question_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        
+        cursor.execute('SELECT * FROM wrong_questions WHERE id = ? AND user_id = ?', (question_id, user_id))
+        question = cursor.fetchone()
+        if not question:
+            return jsonify({'error': 'Question not found'}), 404
+        
+        cursor.execute('''
+            SELECT et.id, et.name, et.category, et.description, qet.confidence
+            FROM error_tags et
+            JOIN question_error_tags qet ON et.id = qet.tag_id
+            WHERE qet.question_id = ?
+            ORDER BY qet.confidence DESC
+        ''', (question_id,))
+        tags = [dict(row) for row in cursor.fetchall()]
+        
+        suggestions = []
+        category_names = {
+            'concept': '概念类',
+            'memory': '记忆类',
+            'calculation': '计算类',
+            'reading': '审题类',
+            'logic': '逻辑类'
+        }
+        
+        if tags:
+            for tag in tags[:3]:
+                cat_name = category_names.get(tag['category'], tag['category'])
+                suggestions.append(f'针对{tag["name"]}问题，建议加强{cat_name}相关知识的学习和练习')
+        else:
+            suggestions.append('建议先进行错误归因分析，了解错误类型')
+        
+        cursor.execute('SELECT kp_id FROM question_mapping WHERE question_id = ?', (question_id,))
+        kp_mappings = cursor.fetchall()
+        
+        related_kps = []
+        for m in kp_mappings:
+            cursor.execute('SELECT id, name, category FROM knowledge_points WHERE id = ?', (m['kp_id'],))
+            kp = cursor.fetchone()
+            if kp:
+                related_kps.append(dict(kp))
+        
+        question_data = _format_question(question)
+    
+    return jsonify({
+        'question': question_data,
+        'tags': tags,
+        'suggestions': suggestions,
+        'related_knowledge_points': related_kps
+    })
+
 
 if __name__ == '__main__':
     ensure_schema()

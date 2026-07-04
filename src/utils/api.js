@@ -113,6 +113,22 @@ export const getErrorPatterns = () => {
   return fetchAPI('/api/error-patterns');
 };
 
+export const getKnowledgeTree = () => {
+  return fetchAPI('/api/knowledge/tree');
+};
+
+export const getKnowledgePoint = (kpId) => {
+  return fetchAPI(`/api/knowledge/${kpId}`);
+};
+
+export const getWeakestKnowledge = (limit = 10) => {
+  return fetchAPI(`/api/knowledge/weakest?limit=${limit}`);
+};
+
+export const getKnowledgeProgress = () => {
+  return fetchAPI('/api/knowledge/progress');
+};
+
 export const getFeatureFlags = () => {
   return fetchAPI('/api/feature-flags');
 };
@@ -124,4 +140,89 @@ export const getWrongQuestionsAnalysis = () => {
 export const getExportUrl = (format) => {
   const userId = getUserId();
   return `${API_BASE}/api/wrong-questions/export/${format}?user_id=${encodeURIComponent(userId)}`;
+};
+
+export const getStudyPlan = () => {
+  return fetchAPI('/api/study-plan');
+};
+
+export const createStudyPlan = (data) => {
+  return fetchAPI('/api/study-plan', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getTodayTasks = () => {
+  return fetchAPI('/api/study-plan/today');
+};
+
+export const completeTask = (taskId, count) => {
+  const body = count !== undefined ? { completed_count: count } : {};
+  return fetchAPI(`/api/study-plan/tasks/${taskId}/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body)
+  });
+};
+
+export const getStudyPlanOverview = () => {
+  return fetchAPI('/api/study-plan/overview');
+};
+
+export const regeneratePlan = () => {
+  return fetchAPI('/api/study-plan/regenerate', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+};
+
+export const createMockExam = (data) => {
+  return fetchAPI('/api/mock-exam/create', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getMockExam = (examId) => {
+  return fetchAPI(`/api/mock-exam/${examId}`);
+};
+
+export const startMockExam = (examId) => {
+  return fetchAPI(`/api/mock-exam/${examId}/start`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+};
+
+export const answerMockExam = (examId, questionIndex, userAnswer) => {
+  return fetchAPI(`/api/mock-exam/${examId}/answer`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ question_index: questionIndex, user_answer: userAnswer })
+  });
+};
+
+export const submitMockExam = (examId) => {
+  return fetchAPI(`/api/mock-exam/${examId}/submit`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({})
+  });
+};
+
+export const getMockExamResult = (examId) => {
+  return fetchAPI(`/api/mock-exam/${examId}/result`);
+};
+
+export const getMockExamList = (page = 1, pageSize = 10) => {
+  return fetchAPI(`/api/mock-exam/list?page=${page}&page_size=${pageSize}`);
+};
+
+export const getMockExamStats = () => {
+  return fetchAPI('/api/mock-exam/stats');
 };
