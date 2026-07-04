@@ -8,7 +8,14 @@ import {
   getRepracticeConversion,
   getReviewQueue,
   getReportDownloadUrl,
-  getTodayStudyGoals
+  getTodayStudyGoals,
+  checkin,
+  getTextbookProgress,
+  getFlashcardStats,
+  getEssayStats,
+  getCaseStats,
+  getMockExamStats,
+  getUserId
 } from '../utils/api';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -27,6 +34,14 @@ function Dashboard() {
   const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
   const [reviewSummary, setReviewSummary] = useState({ today_count: 0, overdue_count: 0, total_pending: 0 });
   const [goals, setGoals] = useState({ goals: [], overall_rate: 0, streak_days: 0, total_checkin_days: 0, checked_in_today: false });
+  const [learningCenter, setLearningCenter] = useState({
+    textbook: { total: 0, completed: 0, rate: 0 },
+    flashcard: { total: 0, mastered: 0, due: 0 },
+    essay: { total: 0, submitted: 0 },
+    caseQ: { total: 0, submitted: 0 },
+    mockExam: { total: 0, avg_score: 0 }
+  });
+  const [checkinBusy, setCheckinBusy] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -37,14 +52,19 @@ function Dashboard() {
   const fetchData = async () => {
     try {
       setError(null);
-      const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData, goalsData] = await Promise.all([
+      const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData, goalsData, textbookData, flashcardData, essayData, caseData, mockData] = await Promise.all([
         getStatsOverview(),
         getStatsCognition(),
         getStatsDaily(7),
         getStatsCategory(),
         getRepracticeConversion(7, 72),
         getReviewQueue(1).catch(() => ({ stats: {} })),
-        getTodayStudyGoals().catch(() => ({ goals: [], overall_rate: 0, streak_days: 0, checked_in_today: false }))
+        getTodayStudyGoals().catch(() => ({ goals: [], overall_rate: 0, streak_days: 0, checked_in_today: false })),
+        getTextbookProgress().catch(() => ({ total_chapters: 0, completed_count: 0, completion_rate: 0 })),
+        getFlashcardStats().catch(() => ({ total_cards: 0, mastered_count: 0, due_count: 0 })),
+        getEssayStats().catch(() => ({ total_topics: 0, submitted_count: 0 })),
+        getCaseStats().catch(() => ({ total_cases: 0, submitted_count: 0 })),
+        getMockExamStats().catch(() => ({ total_exams: 0, avg_score: 0 }))
       ]);
 
       setStats(statsData);
@@ -54,11 +74,50 @@ function Dashboard() {
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
       setReviewSummary(reviewData.stats || { today_count: 0, overdue_count: 0, total_pending: 0 });
       setGoals(goalsData);
+      setLearningCenter({
+        textbook: {
+          total: textbookData.total_chapters || 0,
+          completed: textbookData.completed_count || 0,
+          rate: textbookData.completion_rate || 0
+        },
+        flashcard: {
+          total: flashcardData.total_cards || 0,
+          mastered: flashcardData.mastered_count || 0,
+          due: flashcardData.due_count || 0
+        },
+        essay: {
+          total: essayData.total_topics || 0,
+          submitted: essayData.submitted_count || 0
+        },
+        caseQ: {
+          total: caseData.total_cases || 0,
+          submitted: caseData.submitted_count || 0
+        },
+        mockExam: {
+          total: mockData.total_exams || 0,
+          avg_score: mockData.avg_score || 0
+        }
+      });
     } catch (error) {
       console.error('获取数据失败:', error);
       setError(error.message || '获取数据失败');
     } finally {
       setLoading(false);
+    }
+  };
+
+  const handleQuickCheckin = async () => {
+    if (checkinBusy || goals.checked_in_today) return;
+    setCheckinBusy(true);
+    try {
+      await checkin({ user_id: getUserId(), study_minutes: 30, note: '首页一键打卡' });
+      // 刷新 goals 与打卡状态
+      const refreshed = await getTodayStudyGoals();
+      setGoals(refreshed);
+    } catch (e) {
+      console.error('打卡失败', e);
+    } finally {
+      setCheckinBusy(false);
     }
   };
 
@@ -164,9 +223,14 @@ function Dashboard() {
               ✓ 今日已打卡
             </div>
           ) : (
-            <Link to="/checkin" className="btn btn-primary" style={{ marginTop: '0.75rem', padding: '0.4rem 1rem', fontSize: '0.85rem' }}>
-              去打卡
-            </Link>
+            <button
+              onClick={handleQuickCheckin}
+              disabled={checkinBusy}
+              className="btn btn-primary"
+              style={{ marginTop: '0.75rem', padding: '0.4rem 1rem', fontSize: '0.85rem', cursor: checkinBusy ? 'wait' : 'pointer' }}
+            >
+              {checkinBusy ? '打卡中...' : '一键打卡 +30min'}
+            </button>
           )}
         </div>
       </div>
@@ -200,6 +264,53 @@ function Dashboard() {
           <div className="stat-card-title">72h 二练转化</div>
           <div className="stat-card-value" style={{ color: '#2196f3' }}>{conversion.conversion_rate}%</div>
           <div className="stat-card-sub">{conversion.numerator_users}/{conversion.denominator_users} 用户</div>
+        </div>
+      </div>
+
+      {/* 学习中心：模块导航 + 进度速览 */}
+      <div className="section-card">
+        <h2 className="section-title"><span>🚀</span>学习中心</h2>
+        <p style={{ fontSize: '0.85rem', color: '#888', margin: '0.25rem 0 1rem' }}>点击任一模块快速进入学习，进度实时同步</p>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(5, 1fr)', gap: '0.75rem' }}>
+          {(() => {
+            const lc = learningCenter;
+            const cards = [
+              { key: 'textbook', icon: '📖', label: '教材学习', to: '/textbook',
+                main: `${lc.textbook.completed}/${lc.textbook.total}`,
+                sub: `章节 · ${lc.textbook.rate}%`, progress: lc.textbook.rate },
+              { key: 'flashcard', icon: '🎴', label: '闪卡复习', to: '/knowledge',
+                main: `${lc.flashcard.due}`,
+                sub: `待复习 · 掌握 ${lc.flashcard.mastered}/${lc.flashcard.total}`,
+                progress: lc.flashcard.total > 0 ? (lc.flashcard.mastered / lc.flashcard.total) * 100 : 0 },
+              { key: 'essay', icon: '✍️', label: '论文训练', to: '/essay',
+                main: `${lc.essay.submitted}/${lc.essay.total}`,
+                sub: '已写/题库', progress: lc.essay.total > 0 ? (lc.essay.submitted / lc.essay.total) * 100 : 0 },
+              { key: 'case', icon: '🔧', label: '案例分析', to: '/case',
+                main: `${lc.caseQ.submitted}/${lc.caseQ.total}`,
+                sub: '已写/题库', progress: lc.caseQ.total > 0 ? (lc.caseQ.submitted / lc.caseQ.total) * 100 : 0 },
+              { key: 'mock', icon: '🏆', label: '模考训练', to: '/exam',
+                main: `${lc.mockExam.total}`,
+                sub: `场次 · 均分 ${lc.mockExam.avg_score}`, progress: 0 }
+            ];
+            return cards.map(c => (
+              <Link key={c.key} to={c.to} style={{
+                textDecoration: 'none', color: 'inherit',
+                background: '#f9fafb', borderRadius: '8px', padding: '0.85rem',
+                border: '1px solid #eee', transition: 'all 0.2s',
+                display: 'block'
+              }}>
+                <div style={{ fontSize: '1.4rem' }}>{c.icon}</div>
+                <div style={{ fontWeight: 600, fontSize: '0.95rem', marginTop: '0.25rem', color: '#333' }}>{c.label}</div>
+                <div style={{ fontSize: '1.3rem', fontWeight: 700, color: '#667eea', marginTop: '0.35rem' }}>{c.main}</div>
+                <div style={{ fontSize: '0.72rem', color: '#888', marginTop: '0.15rem' }}>{c.sub}</div>
+                {c.progress > 0 && (
+                  <div style={{ height: '4px', background: '#e5e7eb', borderRadius: '2px', marginTop: '0.4rem', overflow: 'hidden' }}>
+                    <div style={{ width: `${Math.min(100, c.progress)}%`, height: '100%', background: '#667eea' }} />
+                  </div>
+                )}
+              </Link>
+            ));
+          })()}
         </div>
       </div>
 
