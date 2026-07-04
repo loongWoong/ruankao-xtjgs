@@ -12,7 +12,9 @@ import Statistics from './components/Statistics.jsx'
 import StudyPlan from './components/StudyPlan.jsx'
 import MockExam from './components/MockExam.jsx'
 import ErrorAnalysis from './components/ErrorAnalysis.jsx'
-import Notebook from './components/Notebook.jsx'
+import EssayTraining from './components/EssayTraining.jsx'
+import CaseAnalysis from './components/CaseAnalysis.jsx'
+import Textbook from './components/Textbook.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -27,7 +29,9 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/plan" element={<StudyPlan />} />
           <Route path="/exam" element={<MockExam />} />
           <Route path="/analysis" element={<ErrorAnalysis />} />
-          <Route path="/notebook" element={<Notebook />} />
+          <Route path="/essay" element={<EssayTraining />} />
+          <Route path="/case" element={<CaseAnalysis />} />
+          <Route path="/textbook" element={<Textbook />} />
         </Routes>
       </App>
     </Router>

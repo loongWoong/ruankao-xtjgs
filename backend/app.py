@@ -437,6 +437,110 @@ def ensure_schema():
 
         _init_default_flashcards(cursor)
 
+        # 论文训练模块
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS essay_topics (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER,
+                topic_title TEXT NOT NULL,
+                topic_category TEXT,
+                background TEXT,
+                requirements TEXT,
+                key_points TEXT,
+                reference_essay TEXT,
+                source TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS essay_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                topic_id INTEGER NOT NULL,
+                title TEXT,
+                content TEXT,
+                word_count INTEGER DEFAULT 0,
+                time_spent INTEGER DEFAULT 0,
+                self_score INTEGER,
+                self_evaluation TEXT,
+                status TEXT DEFAULT 'draft',
+                submitted_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_essay_topics_year ON essay_topics(year)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_essay_topics_category ON essay_topics(topic_category)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_essay_submissions_user ON essay_submissions(user_id, created_at DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_essay_submissions_topic ON essay_submissions(topic_id)')
+
+        # 案例分析训练模块
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS case_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                year INTEGER,
+                case_title TEXT NOT NULL,
+                background TEXT,
+                questions TEXT,
+                reference_answer TEXT,
+                key_points TEXT,
+                category TEXT,
+                source TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS case_submissions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                case_id INTEGER NOT NULL,
+                answers TEXT,
+                self_score INTEGER,
+                time_spent INTEGER DEFAULT 0,
+                status TEXT DEFAULT 'draft',
+                submitted_at DATETIME,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_case_questions_year ON case_questions(year)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_case_questions_category ON case_questions(category)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_case_submissions_user ON case_submissions(user_id, created_at DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_case_submissions_case ON case_submissions(case_id)')
+
+        # 教材知识学习模块
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS textbook_chapters (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                chapter_num TEXT,
+                title TEXT NOT NULL,
+                content TEXT,
+                summary TEXT,
+                word_count INTEGER DEFAULT 0,
+                parent_id INTEGER,
+                level INTEGER DEFAULT 1,
+                sort_order INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS reading_progress (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                chapter_id INTEGER NOT NULL,
+                status TEXT DEFAULT 'unread',
+                read_time INTEGER DEFAULT 0,
+                updated_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, chapter_id)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_textbook_chapters_parent ON textbook_chapters(parent_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_textbook_chapters_level ON textbook_chapters(level, sort_order)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_reading_progress_user ON reading_progress(user_id, chapter_id)')
+
+        _seed_essay_topics(cursor)
+        _seed_case_questions(cursor)
+
         conn.commit()
 
 def _init_error_tags(cursor):
@@ -529,6 +633,126 @@ def _init_default_flashcards(cursor):
             INSERT INTO flashcards (user_id, kp_id, front, back, difficulty, srs_stage, next_review_at)
             VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
         ''', ('system_default', kp_id, front, back, difficulty))
+
+
+def _seed_essay_topics(cursor):
+    """初始化论文题目（系统架构设计师历年真题与典型考点）"""
+    topics = [
+        {
+            'year': 2022, 'topic_category': '软件架构设计',
+            'topic_title': '论企业应用系统集成中的架构设计',
+            'background': '某大型制造企业经过多年信息化建设，已建设了ERP、CRM、SCM、OA等多个业务系统。由于各系统独立建设，数据无法共享，业务流程割裂，形成信息孤岛。企业决定进行应用系统集成，构建统一的企业信息平台，实现数据共享和业务协同。',
+            'requirements': '请围绕"企业应用系统集成中的架构设计"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的企业应用系统集成项目以及你所担任的主要工作。\n2. 详细论述企业应用系统集成可以采用的架构风格及其特点。\n3. 具体阐述你参与管理或开发的项目中所采用的企业应用系统集成架构设计方案，并说明实施效果。',
+            'key_points': '集成架构风格：数据集成（数据仓库、联邦数据库）、应用集成（RPC、消息中间件、SOA）、界面集成（门户）；ESB企业服务总线；SOA服务编排；微服务集成；数据一致性；接口规范（REST、SOAP）；消息队列异步解耦',
+            'reference_essay': '摘要：本文以笔者参与的某制造企业应用集成项目为例，论述了企业应用系统集成中的架构设计。项目采用基于ESB的SOA架构，通过服务编排实现业务协同，采用消息队列实现异步解耦，最终实现各业务系统的数据共享与流程贯通。\n正文：\n一、项目概述...\n二、集成架构风格分析：1.数据集成 2.应用集成 3.界面集成 4.过程集成...\n三、本项目的架构设计方案：采用SOA+ESB架构...\n四、实施效果与总结...',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2021, 'topic_category': '系统质量属性与架构评估',
+            'topic_title': '论软件架构风格及其应用',
+            'background': '软件架构风格是描述某一特定应用领域中系统组织方式的惯用模式。架构风格定义了一组构件类型、连接件类型、拓扑结构及约束。不同的架构风格适用于不同的应用场景，选择合适的架构风格是架构设计的关键。',
+            'requirements': '请围绕"软件架构风格及其应用"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的软件项目以及你所担任的主要工作。\n2. 详细论述常见的软件架构风格及其特点。\n3. 具体阐述你参与管理或开发的项目中所采用的软件架构风格，并说明选择该架构风格的原因和实施效果。',
+            'key_points': '管道-过滤器风格、客户机/服务器风格、分层架构、面向对象架构、事件驱动架构、解释器风格、黑板架构、SOA、微服务；质量属性驱动选型；ATAM评估方法',
+            'reference_essay': '',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2020, 'topic_category': '系统架构设计',
+            'topic_title': '论微服务架构及其应用',
+            'background': '随着互联网技术的发展和业务规模的扩大，传统单体架构面临部署困难、扩展性差、技术栈单一等问题。微服务架构将应用拆分为一组小的、自治的服务，每个服务独立部署、独立扩展、独立技术选型，已成为云原生应用的主流架构。',
+            'requirements': '请围绕"微服务架构及其应用"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的采用微服务架构的软件项目以及你所担任的主要工作。\n2. 详细论述微服务架构的特点、优点和缺点。\n3. 具体阐述你参与管理或开发的项目中所采用的微服务架构设计方案，并说明实施效果。',
+            'key_points': '微服务特点：单一职责、独立部署、去中心化、轻量级通信；优点：独立扩展、技术异构、故障隔离、团队自治；缺点：分布式复杂性、数据一致性、运维成本、服务间通信；服务注册发现、API网关、配置中心、链路追踪、熔断降级',
+            'reference_essay': '',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2019, 'topic_category': '系统质量属性与架构评估',
+            'topic_title': '论软件架构评估方法及其应用',
+            'background': '软件架构评估是在架构设计之后、系统实现之前对架构方案进行分析和评价的过程，目的是在早期发现架构设计中的风险点、敏感点和权衡点，降低返工成本。常用的架构评估方法有SAAM、ATAM等。',
+            'requirements': '请围绕"软件架构评估方法及其应用"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的需要进行架构评估的软件项目以及你所担任的主要工作。\n2. 详细论述软件架构评估的主要方法及其特点。\n3. 具体阐述你参与管理或开发的项目中所采用的架构评估方法、评估过程和评估结果。',
+            'key_points': 'SAAM（软件架构分析方法）：场景驱动、非质量属性细分；ATAM（架构权衡分析方法）：质量属性效用树、风险点/敏感点/权衡点识别；CBAM成本效益分析；评估步骤：场景收集、架构描述、方法分析、结果报告',
+            'reference_essay': '',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2018, 'topic_category': '软件工程',
+            'topic_title': '论软件需求获取方法及其应用',
+            'background': '软件需求是软件开发的起点和基础，需求获取的充分性和准确性直接影响软件项目的成败。常用的需求获取方法包括用户访谈、问卷调查、观察、原型法、头脑风暴等，不同方法适用于不同场景。',
+            'requirements': '请围绕"软件需求获取方法及其应用"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的软件项目以及你所担任的主要工作。\n2. 详细论述软件需求获取的主要方法及其特点。\n3. 具体阐述你参与管理或开发的项目中所采用的需求获取方法、过程和效果。',
+            'key_points': '用户访谈（结构化/非结构化）、问卷调查、观察法、原型法（抛弃式/演化式）、头脑风暴、JAD联合需求开发、用例驱动；需求获取难点：需求模糊、冲突、变更',
+            'reference_essay': '',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2023, 'topic_category': '云原生架构',
+            'topic_title': '论云原生架构设计及其应用',
+            'background': '云原生（Cloud Native）是一套利用云计算交付模型的优势来构建和运行应用的方法论。云原生架构融合了微服务、容器、DevOps、持续交付等技术理念，使应用具备弹性、可观测、容错、自动伸缩等云特性，是当前企业数字化转型的关键技术。',
+            'requirements': '请围绕"云原生架构设计及其应用"论题，依次从以下三个方面进行论述：\n1. 概要叙述你参与管理或开发的采用云原生架构的软件项目以及你所担任的主要工作。\n2. 详细论述云原生架构的核心特征和关键技术。\n3. 具体阐述你参与管理或开发的项目中所采用的云原生架构设计方案，并说明实施效果。',
+            'key_points': '云原生核心特征：高弹性、高可用、高可观测、自动化；关键技术：容器（Docker）、容器编排（Kubernetes）、微服务、服务网格（Istio）、不可变基础设施、声明式API、DevOps、CI/CD、Serverless',
+            'reference_essay': '',
+            'source': '系统架构设计师教程第二版'
+        },
+    ]
+    for t in topics:
+        cursor.execute('SELECT id FROM essay_topics WHERE topic_title = ?', (t['topic_title'],))
+        if cursor.fetchone():
+            continue
+        cursor.execute('''
+            INSERT INTO essay_topics
+            (year, topic_category, topic_title, background, requirements, key_points, reference_essay, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            t['year'], t['topic_category'], t['topic_title'],
+            t['background'], t['requirements'], t['key_points'],
+            t.get('reference_essay', ''), t['source']
+        ))
+
+
+def _seed_case_questions(cursor):
+    """初始化案例分析题目（系统架构设计师典型题型）"""
+    cases = [
+        {
+            'year': 2022, 'category': '系统质量属性与架构评估',
+            'case_title': '在线交易系统的架构评估',
+            'background': '某电商公司的在线交易系统需要支撑双十一大促活动。系统当前采用三层架构（表示层、业务逻辑层、数据访问层），平时日订单量100万，大促期间峰值订单量预计达到平时的20倍。架构师需要对系统进行评估，确保满足性能、可用性、可修改性等质量属性需求。公司提出了以下质量属性需求：(1) 峰值期间响应时间不超过2秒；(2) 系统可用性不低于99.95%；(3) 新支付方式可在1周内集成上线；(4) 系统应能防止SQL注入等常见攻击。',
+            'questions': '[{"q":"请说明该系统涉及哪些质量属性，并分别给出对应的场景描述。","ref":"性能(响应时间2秒)、可用性(99.95%)、可修改性(1周集成新支付)、安全性(防SQL注入)"},{"q":"针对性能质量属性，列举至少3种提升性能的架构策略。","ref":"缓存、负载均衡、数据库读写分离、分库分表、异步消息队列、CDN静态资源加速、连接池"},{"q":"简述ATAM架构评估方法的步骤，并说明在该项目中如何应用。","ref":"ATAM步骤：1.描述业务动机 2.描述架构 3.生成质量属性效用树 4.分析架构方法 5.讨论和排序场景 6.分析架构方法 7.识别风险点敏感点权衡点"}]',
+            'reference_answer': '问题1：性能（场景：峰值期间用户下单响应时间不超过2秒）、可用性（场景：系统全年可用性不低于99.95%，单点故障不影响整体服务）、可修改性（场景：新增一种支付方式可在1周内完成集成并上线）、安全性（场景：系统能够防御SQL注入、XSS等常见Web攻击）。\n问题2：提升性能的架构策略：①缓存策略（Redis缓存热点商品和会话）；②负载均衡（Nginx+应用层负载均衡）；③数据库优化（读写分离、分库分表）；④异步处理（消息队列削峰填谷）；⑤CDN加速静态资源；⑥连接池复用。\n问题3：ATAM评估步骤：①展示ATAM方法；②描述业务驱动因素；③描述架构方案；④创建质量属性效用树，对场景排序；⑤分析架构方法对高优先级场景的影响；⑥识别风险点、敏感点、权衡点；⑦形成评估报告。在该项目中，通过效用树确定"峰值响应时间<2秒"为最高优先级场景，分析现有架构的瓶颈，识别数据库访问为敏感点，缓存层缺失为风险点。',
+            'key_points': '质量属性识别、性能策略、ATAM评估、效用树、风险点敏感点权衡点',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2021, 'category': '系统架构设计',
+            'case_title': '从单体到微服务的架构演进',
+            'background': '某互联网公司的订单系统采用单体架构，随着业务增长，系统出现部署慢、扩展困难、技术栈受限等问题。公司决定将单体系统拆分为微服务架构。目前系统包括用户服务、商品服务、订单服务、支付服务、库存服务等模块。架构师需要设计微服务拆分方案、服务间通信机制和数据一致性方案。',
+            'questions': '[{"q":"请说明在微服务拆分时应遵循哪些原则？","ref":"单一职责、服务自治、数据库独立、松耦合高内聚、按业务能力拆分"},{"q":"针对服务间通信，比较同步通信与异步通信的优缺点及适用场景。","ref":"同步(RPC/REST)：实时性强、耦合度高；异步(消息队列)：解耦削峰、最终一致"},{"q":"在订单服务调用支付服务和库存服务时，如何保证分布式数据一致性？请给出方案。","ref":"Saga模式/TCC/可靠消息最终一致性/两阶段提交"}]',
+            'reference_answer': '问题1：微服务拆分原则：①单一职责原则，每个服务只负责一个业务能力；②服务自治，独立开发、部署、运维；③数据库独立，每个服务拥有自己的数据库；④松耦合高内聚，服务间通过标准接口通信；⑤按业务能力或领域驱动设计的限界上下文拆分；⑥合适的粒度，避免过细导致管理复杂。\n问题2：同步通信（如REST、gRPC）：优点是调用直观、实时性强、易于调试；缺点是耦合度高、可用性受依赖服务影响、不支持削峰；适用于强依赖、需即时返回结果的场景。异步通信（如消息队列Kafka/RabbitMQ）：优点是解耦、削峰填谷、提高可用性、支持最终一致性；缺点是增加复杂度、调试困难、消息可能丢失或重复；适用于非即时、可异步处理的场景，如订单创建后发送通知。\n问题3：分布式数据一致性方案：①Saga模式（长事务拆分为多个本地事务，通过补偿事务回滚），适合长流程业务；②TCC（Try-Confirm-Cancel），强一致性好但开发成本高；③可靠消息最终一致性（本地消息表+消息队列），适合可接受最终一致性的场景；④两阶段提交（2PC），强一致但性能差。本项目订单+支付+库存建议采用Saga模式或可靠消息最终一致性方案。',
+            'key_points': '微服务拆分原则、服务通信、分布式事务、Saga、TCC、最终一致性',
+            'source': '系统架构设计师教程第二版'
+        },
+        {
+            'year': 2020, 'category': '信息安全技术',
+            'case_title': '企业数据安全架构设计',
+            'background': '某金融机构需要建设一套数据安全防护体系，保护客户敏感数据。系统涉及数据采集、存储、传输、使用、共享、销毁等全生命周期。监管要求满足等保三级标准。数据包括客户身份信息、账户信息、交易记录等。架构师需要设计涵盖数据全生命周期的安全防护方案。',
+            'questions': '[{"q":"请说明数据全生命周期各阶段的安全防护要点。","ref":"采集(脱敏验证)、存储(加密访问控制)、传输(加密通道)、使用(权限最小化)、共享(审计脱敏)、销毁(彻底清除)"},{"q":"列举至少4种数据加密技术及其适用场景。","ref":"对称加密AES(大数据量)、非对称RSA(密钥交换签名)、哈希SHA(完整性)、数字签名(不可否认性)"},{"q":"简述等保三级对数据安全的要求，并说明本系统如何满足。","ref":"数据完整性、保密性、可用性要求；通过加密、访问控制、备份、审计实现"}]',
+            'reference_answer': '问题1：数据全生命周期安全防护：①采集阶段：数据源身份认证、输入校验、敏感数据脱敏；②存储阶段：数据库加密、字段级加密、访问控制、备份加密；③传输阶段：TLS/SSL加密通道、VPN、数据完整性校验；④使用阶段：最小权限原则、基于角色的访问控制、数据掩码、操作审计；⑤共享阶段：数据脱敏、数字水印、共享协议、审计日志；⑥销毁阶段：安全擦除、介质物理销毁、销毁记录。\n问题2：数据加密技术：①对称加密（AES、DES），加解密速度快，适合大数据量加密；②非对称加密（RSA、ECC），使用公私钥对，适合密钥交换和数字签名；③哈希算法（SHA-256、MD5），单向不可逆，用于数据完整性校验和密码存储；④数字签名，结合非对称加密和哈希，提供身份认证和不可否认性；⑤国密算法（SM2/SM3/SM4），金融行业合规要求。\n问题3：等保三级数据安全要求：①数据保密性：传输和存储加密；②数据完整性：校验机制防篡改；③数据可用性：冗余备份、容灾；④剩余信息保护：存储空间重用前清除；⑤个人信息保护：最小化收集、脱敏展示。本系统通过AES加密存储敏感字段、TLS加密传输、基于RBAC的访问控制、异地备份容灾、操作审计日志、客户信息脱敏展示等措施满足等保三级要求。',
+            'key_points': '数据生命周期、加密技术、等保三级、访问控制、审计',
+            'source': '系统架构设计师教程第二版'
+        },
+    ]
+    for c in cases:
+        cursor.execute('SELECT id FROM case_questions WHERE case_title = ?', (c['case_title'],))
+        if cursor.fetchone():
+            continue
+        cursor.execute('''
+            INSERT INTO case_questions
+            (year, category, case_title, background, questions, reference_answer, key_points, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            c['year'], c['category'], c['case_title'],
+            c['background'], c['questions'], c['reference_answer'],
+            c['key_points'], c['source']
+        ))
+
 
 def auto_analyze_error(cursor, question_id, question_text, user_answer, correct_answer, kp_id=None):
     question_text = question_text or ''
@@ -4115,6 +4339,628 @@ def get_flashcard_stats():
         'today_review_count': today_review,
         'total_reviews': total_reviews
     })
+
+
+# ==================== 论文训练模块 ====================
+
+@app.route('/api/essay/topics', methods=['GET'])
+@api_response
+def get_essay_topics():
+    page, limit = get_pagination_params()
+    year = request.args.get('year', '')
+    category = request.args.get('category', '')
+    search = request.args.get('search', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['1=1']
+        params = []
+        if year:
+            where_clauses.append('year = ?')
+            params.append(safe_int(year, 0))
+        if category:
+            where_clauses.append('topic_category = ?')
+            params.append(sanitize_string(category, 50))
+        if search:
+            safe_search = sanitize_search_query(search)
+            if safe_search:
+                where_clauses.append("(topic_title LIKE ? ESCAPE '\\' OR background LIKE ? ESCAPE '\\')")
+                like_pattern = f'%{safe_search}%'
+                params.extend([like_pattern, like_pattern])
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM essay_topics WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT id, year, topic_title, topic_category, background, requirements, key_points, source
+            FROM essay_topics
+            WHERE {where_sql}
+            ORDER BY year DESC, id ASC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        topics = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT DISTINCT topic_category FROM essay_topics WHERE topic_category IS NOT NULL ORDER BY topic_category')
+        categories = [row['topic_category'] for row in cursor.fetchall()]
+        cursor.execute('SELECT DISTINCT year FROM essay_topics WHERE year IS NOT NULL ORDER BY year DESC')
+        years = [row['year'] for row in cursor.fetchall()]
+
+    return jsonify({'items': topics, 'total': total, 'page': page, 'limit': limit, 'categories': categories, 'years': years})
+
+
+@app.route('/api/essay/topics/<int:topic_id>', methods=['GET'])
+@api_response
+def get_essay_topic_detail(topic_id):
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM essay_topics WHERE id = ?', (topic_id,))
+        topic = cursor.fetchone()
+        if not topic:
+            return jsonify({'error': 'Essay topic not found'}), 404
+        return jsonify(dict(topic))
+
+
+@app.route('/api/essay/submit', methods=['POST'])
+@api_response
+def submit_essay():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    topic_id = safe_int(data.get('topic_id'), 0)
+    title = sanitize_string(data.get('title', ''), 200)
+    content = sanitize_string(data.get('content', ''), 50000)
+    time_spent = safe_int(data.get('time_spent', 0), 0)
+    self_score = data.get('self_score')
+    self_evaluation = sanitize_string(data.get('self_evaluation', ''), 2000)
+    status = sanitize_string(data.get('status', 'draft'), 20)
+
+    if not topic_id:
+        return jsonify({'error': 'topic_id is required'}), 400
+    if status not in ['draft', 'submitted']:
+        status = 'draft'
+
+    word_count = len(content) if content else 0
+    submitted_at = datetime.now().isoformat() if status == 'submitted' else None
+    self_score = int(self_score) if self_score is not None else None
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM essay_topics WHERE id = ?', (topic_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Essay topic not found'}), 404
+
+        cursor.execute('''
+            INSERT INTO essay_submissions
+            (user_id, topic_id, title, content, word_count, time_spent, self_score, self_evaluation, status, submitted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, topic_id, title, content, word_count, time_spent, self_score, self_evaluation, status, submitted_at))
+        sub_id = cursor.lastrowid
+        conn.commit()
+
+        cursor.execute('SELECT * FROM essay_submissions WHERE id = ?', (sub_id,))
+        submission = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'submission': submission})
+
+
+@app.route('/api/essay/submissions', methods=['GET'])
+@api_response
+def get_essay_submissions():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+    topic_id = request.args.get('topic_id', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['user_id = ?']
+        params = [user_id]
+        if topic_id:
+            where_clauses.append('topic_id = ?')
+            params.append(safe_int(topic_id, 0))
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM essay_submissions WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT es.*, et.topic_title, et.topic_category, et.year
+            FROM essay_submissions es
+            LEFT JOIN essay_topics et ON es.topic_id = et.id
+            WHERE {where_sql}
+            ORDER BY es.created_at DESC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        submissions = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': submissions, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/essay/submissions/<int:sub_id>', methods=['GET'])
+@api_response
+def get_essay_submission_detail(sub_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT es.*, et.topic_title, et.topic_category, et.year, et.background, et.requirements, et.key_points, et.reference_essay
+            FROM essay_submissions es
+            LEFT JOIN essay_topics et ON es.topic_id = et.id
+            WHERE es.id = ? AND es.user_id = ?
+        ''', (sub_id, user_id))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Submission not found'}), 404
+        return jsonify(dict(row))
+
+
+@app.route('/api/essay/submissions/<int:sub_id>', methods=['PUT'])
+@api_response
+def update_essay_submission(sub_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM essay_submissions WHERE id = ? AND user_id = ?', (sub_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Submission not found'}), 404
+
+        update_fields = []
+        params = []
+        if 'title' in data:
+            update_fields.append('title = ?')
+            params.append(sanitize_string(data['title'], 200))
+        if 'content' in data:
+            content = sanitize_string(data['content'], 50000)
+            update_fields.append('content = ?')
+            params.append(content)
+            update_fields.append('word_count = ?')
+            params.append(len(content) if content else 0)
+        if 'time_spent' in data:
+            update_fields.append('time_spent = ?')
+            params.append(safe_int(data['time_spent'], 0))
+        if 'self_score' in data:
+            ss = data['self_score']
+            update_fields.append('self_score = ?')
+            params.append(int(ss) if ss is not None else None)
+        if 'self_evaluation' in data:
+            update_fields.append('self_evaluation = ?')
+            params.append(sanitize_string(data['self_evaluation'], 2000))
+        if 'status' in data:
+            st = sanitize_string(data['status'], 20)
+            if st in ['draft', 'submitted']:
+                update_fields.append('status = ?')
+                params.append(st)
+                if st == 'submitted':
+                    update_fields.append('submitted_at = ?')
+                    params.append(datetime.now().isoformat())
+
+        if update_fields:
+            update_fields.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(sub_id)
+            cursor.execute(f'UPDATE essay_submissions SET {", ".join(update_fields)} WHERE id = ?', params)
+            conn.commit()
+
+        cursor.execute('SELECT * FROM essay_submissions WHERE id = ?', (sub_id,))
+        submission = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'submission': submission})
+
+
+@app.route('/api/essay/stats', methods=['GET'])
+@api_response
+def get_essay_stats():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM essay_submissions WHERE user_id = ?', (user_id,))
+        total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM essay_submissions WHERE user_id = ? AND status = 'submitted'", (user_id,))
+        submitted = cursor.fetchone()[0]
+        cursor.execute('SELECT AVG(self_score) FROM essay_submissions WHERE user_id = ? AND self_score IS NOT NULL', (user_id,))
+        avg_score = cursor.fetchone()[0]
+        cursor.execute('SELECT SUM(word_count) FROM essay_submissions WHERE user_id = ?', (user_id,))
+        total_words = cursor.fetchone()[0] or 0
+        cursor.execute('SELECT SUM(time_spent) FROM essay_submissions WHERE user_id = ?', (user_id,))
+        total_time = cursor.fetchone()[0] or 0
+        cursor.execute('SELECT COUNT(*) FROM essay_topics')
+        total_topics = cursor.fetchone()[0]
+
+    return jsonify({
+        'total_submissions': total,
+        'submitted_count': submitted,
+        'avg_self_score': round(avg_score, 1) if avg_score else 0,
+        'total_words': total_words,
+        'total_time_spent': total_time,
+        'total_topics': total_topics
+    })
+
+
+# ==================== 案例分析训练模块 ====================
+
+@app.route('/api/case/questions', methods=['GET'])
+@api_response
+def get_case_questions():
+    page, limit = get_pagination_params()
+    year = request.args.get('year', '')
+    category = request.args.get('category', '')
+    search = request.args.get('search', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['1=1']
+        params = []
+        if year:
+            where_clauses.append('year = ?')
+            params.append(safe_int(year, 0))
+        if category:
+            where_clauses.append('category = ?')
+            params.append(sanitize_string(category, 50))
+        if search:
+            safe_search = sanitize_search_query(search)
+            if safe_search:
+                where_clauses.append("(case_title LIKE ? ESCAPE '\\' OR background LIKE ? ESCAPE '\\')")
+                like_pattern = f'%{safe_search}%'
+                params.extend([like_pattern, like_pattern])
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM case_questions WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT id, year, case_title, category, background, key_points, source
+            FROM case_questions
+            WHERE {where_sql}
+            ORDER BY year DESC, id ASC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        questions = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT DISTINCT category FROM case_questions WHERE category IS NOT NULL ORDER BY category')
+        categories = [row['category'] for row in cursor.fetchall()]
+        cursor.execute('SELECT DISTINCT year FROM case_questions WHERE year IS NOT NULL ORDER BY year DESC')
+        years = [row['year'] for row in cursor.fetchall()]
+
+    return jsonify({'items': questions, 'total': total, 'page': page, 'limit': limit, 'categories': categories, 'years': years})
+
+
+@app.route('/api/case/questions/<int:case_id>', methods=['GET'])
+@api_response
+def get_case_question_detail(case_id):
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM case_questions WHERE id = ?', (case_id,))
+        case = cursor.fetchone()
+        if not case:
+            return jsonify({'error': 'Case question not found'}), 404
+        result = dict(case)
+        try:
+            result['questions_list'] = json.loads(result['questions']) if result['questions'] else []
+        except (json.JSONDecodeError, TypeError):
+            result['questions_list'] = []
+        return jsonify(result)
+
+
+@app.route('/api/case/submit', methods=['POST'])
+@api_response
+def submit_case():
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    case_id = safe_int(data.get('case_id'), 0)
+    answers = data.get('answers', {})
+    time_spent = safe_int(data.get('time_spent', 0), 0)
+    self_score = data.get('self_score')
+    status = sanitize_string(data.get('status', 'draft'), 20)
+
+    if not case_id:
+        return jsonify({'error': 'case_id is required'}), 400
+    if status not in ['draft', 'submitted']:
+        status = 'draft'
+
+    if not isinstance(answers, dict):
+        answers = {}
+    answers_json = json.dumps(answers, ensure_ascii=False)
+    submitted_at = datetime.now().isoformat() if status == 'submitted' else None
+    self_score = int(self_score) if self_score is not None else None
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM case_questions WHERE id = ?', (case_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Case question not found'}), 404
+
+        cursor.execute('''
+            INSERT INTO case_submissions
+            (user_id, case_id, answers, self_score, time_spent, status, submitted_at)
+            VALUES (?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, case_id, answers_json, self_score, time_spent, status, submitted_at))
+        sub_id = cursor.lastrowid
+        conn.commit()
+
+        cursor.execute('SELECT * FROM case_submissions WHERE id = ?', (sub_id,))
+        submission = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'submission': submission})
+
+
+@app.route('/api/case/submissions', methods=['GET'])
+@api_response
+def get_case_submissions():
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+    case_id = request.args.get('case_id', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_clauses = ['user_id = ?']
+        params = [user_id]
+        if case_id:
+            where_clauses.append('case_id = ?')
+            params.append(safe_int(case_id, 0))
+
+        where_sql = ' AND '.join(where_clauses)
+        cursor.execute(f'SELECT COUNT(*) FROM case_submissions WHERE {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute(f'''
+            SELECT cs.*, cq.case_title, cq.category, cq.year
+            FROM case_submissions cs
+            LEFT JOIN case_questions cq ON cs.case_id = cq.id
+            WHERE {where_sql}
+            ORDER BY cs.created_at DESC
+            LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        submissions = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': submissions, 'total': total, 'page': page, 'limit': limit})
+
+
+@app.route('/api/case/submissions/<int:sub_id>', methods=['GET'])
+@api_response
+def get_case_submission_detail(sub_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT cs.*, cq.case_title, cq.category, cq.year, cq.background, cq.questions, cq.reference_answer, cq.key_points
+            FROM case_submissions cs
+            LEFT JOIN case_questions cq ON cs.case_id = cq.id
+            WHERE cs.id = ? AND cs.user_id = ?
+        ''', (sub_id, user_id))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Submission not found'}), 404
+        result = dict(row)
+        try:
+            result['questions_list'] = json.loads(result['questions']) if result['questions'] else []
+        except (json.JSONDecodeError, TypeError):
+            result['questions_list'] = []
+        try:
+            result['answers_list'] = json.loads(result['answers']) if result['answers'] else {}
+        except (json.JSONDecodeError, TypeError):
+            result['answers_list'] = {}
+        return jsonify(result)
+
+
+@app.route('/api/case/submissions/<int:sub_id>', methods=['PUT'])
+@api_response
+def update_case_submission(sub_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM case_submissions WHERE id = ? AND user_id = ?', (sub_id, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Submission not found'}), 404
+
+        update_fields = []
+        params = []
+        if 'answers' in data:
+            answers = data['answers'] if isinstance(data['answers'], dict) else {}
+            update_fields.append('answers = ?')
+            params.append(json.dumps(answers, ensure_ascii=False))
+        if 'time_spent' in data:
+            update_fields.append('time_spent = ?')
+            params.append(safe_int(data['time_spent'], 0))
+        if 'self_score' in data:
+            ss = data['self_score']
+            update_fields.append('self_score = ?')
+            params.append(int(ss) if ss is not None else None)
+        if 'status' in data:
+            st = sanitize_string(data['status'], 20)
+            if st in ['draft', 'submitted']:
+                update_fields.append('status = ?')
+                params.append(st)
+                if st == 'submitted':
+                    update_fields.append('submitted_at = ?')
+                    params.append(datetime.now().isoformat())
+
+        if update_fields:
+            update_fields.append('updated_at = CURRENT_TIMESTAMP')
+            params.append(sub_id)
+            cursor.execute(f'UPDATE case_submissions SET {", ".join(update_fields)} WHERE id = ?', params)
+            conn.commit()
+
+        cursor.execute('SELECT * FROM case_submissions WHERE id = ?', (sub_id,))
+        submission = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'submission': submission})
+
+
+@app.route('/api/case/stats', methods=['GET'])
+@api_response
+def get_case_stats():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM case_submissions WHERE user_id = ?', (user_id,))
+        total = cursor.fetchone()[0]
+        cursor.execute("SELECT COUNT(*) FROM case_submissions WHERE user_id = ? AND status = 'submitted'", (user_id,))
+        submitted = cursor.fetchone()[0]
+        cursor.execute('SELECT AVG(self_score) FROM case_submissions WHERE user_id = ? AND self_score IS NOT NULL', (user_id,))
+        avg_score = cursor.fetchone()[0]
+        cursor.execute('SELECT SUM(time_spent) FROM case_submissions WHERE user_id = ?', (user_id,))
+        total_time = cursor.fetchone()[0] or 0
+        cursor.execute('SELECT COUNT(*) FROM case_questions')
+        total_cases = cursor.fetchone()[0]
+
+    return jsonify({
+        'total_submissions': total,
+        'submitted_count': submitted,
+        'avg_self_score': round(avg_score, 1) if avg_score else 0,
+        'total_time_spent': total_time,
+        'total_cases': total_cases
+    })
+
+
+# ==================== 教材知识学习模块 ====================
+
+@app.route('/api/textbook/chapters', methods=['GET'])
+@api_response
+def get_textbook_chapters():
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT id, chapter_num, title, summary, word_count, parent_id, level, sort_order
+            FROM textbook_chapters
+            ORDER BY sort_order ASC, id ASC
+        ''')
+        chapters = [dict(row) for row in cursor.fetchall()]
+    return jsonify({'items': chapters, 'total': len(chapters)})
+
+
+@app.route('/api/textbook/chapters/<int:chapter_id>', methods=['GET'])
+@api_response
+def get_textbook_chapter_detail(chapter_id):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM textbook_chapters WHERE id = ?', (chapter_id,))
+        chapter = cursor.fetchone()
+        if not chapter:
+            return jsonify({'error': 'Chapter not found'}), 404
+        result = dict(chapter)
+
+        cursor.execute('SELECT * FROM reading_progress WHERE user_id = ? AND chapter_id = ?', (user_id, chapter_id))
+        progress = cursor.fetchone()
+        result['progress'] = dict(progress) if progress else {'status': 'unread', 'read_time': 0}
+
+        cursor.execute('SELECT id, title, chapter_num FROM textbook_chapters WHERE sort_order < ? ORDER BY sort_order DESC LIMIT 1', (chapter['sort_order'],))
+        prev = cursor.fetchone()
+        result['prev_chapter'] = dict(prev) if prev else None
+        cursor.execute('SELECT id, title, chapter_num FROM textbook_chapters WHERE sort_order > ? ORDER BY sort_order ASC LIMIT 1', (chapter['sort_order'],))
+        nxt = cursor.fetchone()
+        result['next_chapter'] = dict(nxt) if nxt else None
+    return jsonify(result)
+
+
+@app.route('/api/textbook/chapters/<int:chapter_id>/progress', methods=['POST'])
+@api_response
+def update_reading_progress(chapter_id):
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    status = sanitize_string(data.get('status', 'reading'), 20)
+    read_time = safe_int(data.get('read_time', 0), 0)
+
+    if status not in ['unread', 'reading', 'completed']:
+        status = 'reading'
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM textbook_chapters WHERE id = ?', (chapter_id,))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Chapter not found'}), 404
+
+        cursor.execute('''
+            INSERT INTO reading_progress (user_id, chapter_id, status, read_time, updated_at)
+            VALUES (?, ?, ?, ?, CURRENT_TIMESTAMP)
+            ON CONFLICT(user_id, chapter_id) DO UPDATE SET
+                status = excluded.status,
+                read_time = reading_progress.read_time + excluded.read_time,
+                updated_at = CURRENT_TIMESTAMP
+        ''', (user_id, chapter_id, status, read_time))
+        conn.commit()
+
+        cursor.execute('SELECT * FROM reading_progress WHERE user_id = ? AND chapter_id = ?', (user_id, chapter_id))
+        progress = dict(cursor.fetchone())
+
+    return jsonify({'success': True, 'progress': progress})
+
+
+@app.route('/api/textbook/progress', methods=['GET'])
+@api_response
+def get_textbook_progress():
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM textbook_chapters')
+        total_chapters = cursor.fetchone()[0]
+        cursor.execute('''
+            SELECT status, COUNT(*) as cnt
+            FROM reading_progress
+            WHERE user_id = ?
+            GROUP BY status
+        ''', (user_id,))
+        status_counts = {row['status']: row['cnt'] for row in cursor.fetchall()}
+        cursor.execute('SELECT SUM(read_time) FROM reading_progress WHERE user_id = ?', (user_id,))
+        total_read_time = cursor.fetchone()[0] or 0
+
+        cursor.execute('''
+            SELECT rp.status, rp.read_time, rp.updated_at, tc.id, tc.chapter_num, tc.title, tc.word_count
+            FROM reading_progress rp
+            JOIN textbook_chapters tc ON rp.chapter_id = tc.id
+            WHERE rp.user_id = ?
+            ORDER BY rp.updated_at DESC
+            LIMIT 10
+        ''', (user_id,))
+        recent = [dict(row) for row in cursor.fetchall()]
+
+    completed = status_counts.get('completed', 0)
+    reading = status_counts.get('reading', 0)
+    return jsonify({
+        'total_chapters': total_chapters,
+        'completed_count': completed,
+        'reading_count': reading,
+        'unread_count': max(0, total_chapters - completed - reading),
+        'total_read_time': total_read_time,
+        'completion_rate': round(completed / total_chapters * 100, 2) if total_chapters > 0 else 0,
+        'recent_chapters': recent
+    })
+
+
+@app.route('/api/textbook/search', methods=['GET'])
+@api_response
+def search_textbook():
+    keyword = sanitize_search_query(request.args.get('q', ''))
+    page, limit = get_pagination_params()
+    if not keyword:
+        return jsonify({'items': [], 'total': 0, 'page': page, 'limit': limit})
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        like_pattern = f'%{keyword}%'
+        cursor.execute('''
+            SELECT COUNT(*) FROM textbook_chapters
+            WHERE content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+        ''', (like_pattern, like_pattern))
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute('''
+            SELECT id, chapter_num, title, summary, word_count
+            FROM textbook_chapters
+            WHERE content LIKE ? ESCAPE '\\' OR title LIKE ? ESCAPE '\\'
+            ORDER BY sort_order ASC
+            LIMIT ? OFFSET ?
+        ''', (like_pattern, like_pattern, limit, offset))
+        chapters = [dict(row) for row in cursor.fetchall()]
+
+    return jsonify({'items': chapters, 'total': total, 'page': page, 'limit': limit})
 
 
 if __name__ == '__main__':

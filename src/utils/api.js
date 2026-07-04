@@ -364,3 +364,113 @@ export const reviewFlashcard = (cardId, quality) => {
 export const getFlashcardStats = () => {
   return fetchAPI('/api/flashcards/stats');
 };
+
+// ==================== 论文训练 ====================
+
+export const getEssayTopics = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/essay/topics${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getEssayTopic = (topicId) => {
+  return fetchAPI(`/api/essay/topics/${topicId}`);
+};
+
+export const submitEssay = (data) => {
+  return fetchAPI('/api/essay/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getEssaySubmissions = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/essay/submissions${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getEssaySubmission = (subId) => {
+  return fetchAPI(`/api/essay/submissions/${subId}`);
+};
+
+export const updateEssaySubmission = (subId, data) => {
+  return fetchAPI(`/api/essay/submissions/${subId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getEssayStats = () => {
+  return fetchAPI('/api/essay/stats');
+};
+
+// ==================== 案例分析训练 ====================
+
+export const getCaseQuestions = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/case/questions${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getCaseQuestion = (caseId) => {
+  return fetchAPI(`/api/case/questions/${caseId}`);
+};
+
+export const submitCase = (data) => {
+  return fetchAPI('/api/case/submit', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getCaseSubmissions = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/case/submissions${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getCaseSubmission = (subId) => {
+  return fetchAPI(`/api/case/submissions/${subId}`);
+};
+
+export const updateCaseSubmission = (subId, data) => {
+  return fetchAPI(`/api/case/submissions/${subId}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getCaseStats = () => {
+  return fetchAPI('/api/case/stats');
+};
+
+// ==================== 教材学习 ====================
+
+export const getTextbookChapters = () => {
+  return fetchAPI('/api/textbook/chapters');
+};
+
+export const getTextbookChapter = (chapterId) => {
+  return fetchAPI(`/api/textbook/chapters/${chapterId}`);
+};
+
+export const updateReadingProgress = (chapterId, data) => {
+  return fetchAPI(`/api/textbook/chapters/${chapterId}/progress`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getTextbookProgress = () => {
+  return fetchAPI('/api/textbook/progress');
+};
+
+export const searchTextbook = (keyword, page = 1) => {
+  return fetchAPI(`/api/textbook/search?q=${encodeURIComponent(keyword)}&page=${page}`);
+};

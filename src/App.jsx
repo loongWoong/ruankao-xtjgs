@@ -9,14 +9,17 @@ function App({ children }) {
 
   const navItems = [
     { path: '/', label: '总览', icon: '📊' },
+    { path: '/textbook', label: '教材学习', icon: '📖' },
     { path: '/knowledge', label: '知识图谱', icon: '🌳' },
     { path: '/questions', label: '错题库', icon: '📚' },
     { path: '/analysis', label: '错题分析', icon: '🎯' },
     { path: '/practice', label: '练习', icon: '✍️' },
     { path: '/exam', label: '模拟考试', icon: '📝' },
+    { path: '/case', label: '案例分析', icon: '🔍' },
+    { path: '/essay', label: '论文训练', icon: '✏️' },
     { path: '/statistics', label: '统计', icon: '📈' },
     { path: '/plan', label: '学习计划', icon: '📅' },
-    { path: '/notebook', label: '笔记', icon: '📝' }
+    { path: '/notebook', label: '笔记', icon: '🗒️' }
   ];
 
   return (
