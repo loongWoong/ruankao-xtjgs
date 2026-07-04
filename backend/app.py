@@ -2006,9 +2006,11 @@ def update_srs(cursor, question_id, is_correct):
             next_review_time = datetime('now', ?),
             last_review_time = CURRENT_TIMESTAMP,
             review_count = review_count + 1,
+            correct_count = correct_count + ?,
+            wrong_count = wrong_count + ?,
             is_mastered = ?
         WHERE id = ?
-    ''', (new_stage, f'+{days} day', is_mastered, question_id))
+    ''', (new_stage, f'+{days} day', 1 if is_correct else 0, 0 if is_correct else 1, is_mastered, question_id))
 
     return new_stage
 
@@ -2193,6 +2195,59 @@ def get_wrong_questions():
         
         questions = [_format_question(row) for row in cursor.fetchall()]
     return jsonify({'items': questions, 'total': total, 'page': page, 'limit': limit})
+
+@app.route('/api/wrong-questions/analysis', methods=['GET'])
+@api_response
+def get_wrong_questions_analysis():
+    """错题聚合分析：总数 + 按分类统计 + 近 N 天错题趋势。
+    前端 WrongQuestionsAnalysis 组件依赖此接口。
+    """
+    user_id = get_user_id()
+    days = request.args.get('days', 30, type=int)
+    days = max(1, min(days, 180))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 总错题数（过滤测试数据）
+        cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user_id,))
+        total_wrong = cursor.fetchone()[0]
+
+        # 按分类聚合（过滤空 + 测试数据）
+        cursor.execute('''
+            SELECT category, COUNT(*) as cnt
+            FROM wrong_questions
+            WHERE user_id = ? AND category != ""
+            GROUP BY category
+            ORDER BY cnt DESC
+        ''', (user_id,))
+        category_stats = []
+        for row in cursor.fetchall():
+            if row['category'] in TEST_CATEGORY_PATTERNS:
+                continue
+            percentage = round((row['cnt'] / total_wrong) * 100, 2) if total_wrong > 0 else 0
+            category_stats.append({
+                'category': row['category'],
+                'count': row['cnt'],
+                'percentage': percentage
+            })
+
+        # 近 N 天错题新增趋势
+        cursor.execute('''
+            SELECT DATE(created_at) as day, COUNT(*) as cnt
+            FROM wrong_questions
+            WHERE user_id = ?
+              AND created_at >= datetime('now', ?)
+            GROUP BY DATE(created_at)
+            ORDER BY day ASC
+        ''', (user_id, f'-{days} days'))
+        daily_stats = [{'date': r['day'], 'count': r['cnt']} for r in cursor.fetchall()]
+
+    return jsonify({
+        'total_wrong': total_wrong,
+        'category_stats': category_stats,
+        'daily_stats': daily_stats
+    })
 
 @app.route('/api/wrong-questions/<int:question_id>', methods=['GET'])
 @api_response
