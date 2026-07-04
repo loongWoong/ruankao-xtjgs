@@ -17,6 +17,8 @@ import CaseAnalysis from './components/CaseAnalysis.jsx'
 import Textbook from './components/Textbook.jsx'
 import RealExam from './components/RealExam.jsx'
 import SyllabusCoverage from './components/SyllabusCoverage.jsx'
+import StudyCheckin from './components/StudyCheckin.jsx'
+import CustomQuestions from './components/CustomQuestions.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -36,6 +38,8 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/textbook" element={<Textbook />} />
           <Route path="/real-exam" element={<RealExam />} />
           <Route path="/syllabus" element={<SyllabusCoverage />} />
+          <Route path="/checkin" element={<StudyCheckin />} />
+          <Route path="/custom-questions" element={<CustomQuestions />} />
         </Routes>
       </App>
     </Router>

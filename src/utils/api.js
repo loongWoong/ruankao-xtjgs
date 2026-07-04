@@ -500,3 +500,79 @@ export const getRealExamStats = () => {
 export const getSyllabusCoverage = () => {
   return fetchAPI('/api/syllabus/coverage');
 };
+
+// ==================== 学习激励（打卡+时长） ====================
+
+export const checkin = (data) => {
+  return fetchAPI('/api/checkin', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getTodayCheckin = () => {
+  return fetchAPI('/api/checkin/today');
+};
+
+export const getCheckinStreak = () => {
+  return fetchAPI('/api/checkin/streak');
+};
+
+export const getCheckinCalendar = (month) => {
+  return fetchAPI(`/api/checkin/calendar?month=${month}`);
+};
+
+export const recordStudySession = (data) => {
+  return fetchAPI('/api/study-session', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getStudySessionStats = (days = 30) => {
+  return fetchAPI(`/api/study-session/stats?days=${days}`);
+};
+
+// ==================== 自定义题目（手动录入/导入） ====================
+
+export const createCustomQuestion = (data) => {
+  return fetchAPI('/api/custom-questions', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const getCustomQuestions = (params = {}) => {
+  const searchParams = new URLSearchParams(params);
+  const queryString = searchParams.toString();
+  return fetchAPI(`/api/custom-questions${queryString ? `?${queryString}` : ''}`);
+};
+
+export const getCustomQuestion = (qid) => {
+  return fetchAPI(`/api/custom-questions/${qid}`);
+};
+
+export const updateCustomQuestion = (qid, data) => {
+  return fetchAPI(`/api/custom-questions/${qid}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
+export const deleteCustomQuestion = (qid) => {
+  return fetchAPI(`/api/custom-questions/${qid}`, {
+    method: 'DELETE'
+  });
+};
+
+export const importCustomQuestions = (questions) => {
+  return fetchAPI('/api/custom-questions/import', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ questions })
+  });
+};

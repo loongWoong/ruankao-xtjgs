@@ -560,6 +560,53 @@ def ensure_schema():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_real_exam_category ON real_exam_questions(category)')
         _seed_real_exam_questions(cursor)
 
+        # 学习打卡（每日一次）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS study_checkins (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                checkin_date DATE NOT NULL,
+                study_minutes INTEGER DEFAULT 0,
+                note TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                UNIQUE(user_id, checkin_date)
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_checkin_user_date ON study_checkins(user_id, checkin_date)')
+
+        # 学习会话（计时模块）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS study_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                module TEXT,
+                start_time DATETIME NOT NULL,
+                end_time DATETIME,
+                duration_minutes INTEGER DEFAULT 0,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_session_user_start ON study_sessions(user_id, start_time)')
+
+        # 自定义题目（手动录入/导入）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS custom_questions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                question_text TEXT NOT NULL,
+                question_type TEXT DEFAULT 'single_choice',
+                options TEXT,
+                correct_answer TEXT NOT NULL,
+                explanation TEXT,
+                category TEXT,
+                kp_id INTEGER,
+                source TEXT DEFAULT 'manual',
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_custom_q_user ON custom_questions(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_custom_q_category ON custom_questions(category)')
+
         conn.commit()
 
 def _init_error_tags(cursor):
@@ -5431,6 +5478,431 @@ def get_syllabus_coverage():
             'completed_textbook_chapters': len(completed_chapters)
         }
     })
+
+
+# ==================== 学习激励体系（打卡+时长） ====================
+
+@app.route('/api/checkin', methods=['POST'])
+@api_response
+def checkin():
+    """每日打卡：记录当日学习时长"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    study_minutes = safe_int(data.get('study_minutes', 0), 0)
+    study_minutes = max(0, min(1440, study_minutes))  # 单日上限 1440 分钟
+    note = sanitize_string(data.get('note', ''), 500)
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        try:
+            cursor.execute('''
+                INSERT INTO study_checkins (user_id, checkin_date, study_minutes, note)
+                VALUES (?, ?, ?, ?)
+            ''', (user_id, today, study_minutes, note))
+            checkin_id = cursor.lastrowid
+            is_first_today = True
+        except sqlite3.IntegrityError:
+            cursor.execute('''
+                UPDATE study_checkins
+                SET study_minutes = ?, note = ?
+                WHERE user_id = ? AND checkin_date = ?
+            ''', (study_minutes, note, user_id, today))
+            cursor.execute('SELECT id FROM study_checkins WHERE user_id = ? AND checkin_date = ?', (user_id, today))
+            checkin_id = cursor.fetchone()[0]
+            is_first_today = False
+        conn.commit()
+
+        # 计算连续打卡天数
+        cursor.execute('''
+            SELECT checkin_date FROM study_checkins
+            WHERE user_id = ?
+            ORDER BY checkin_date DESC LIMIT 60
+        ''', (user_id,))
+        dates = [row['checkin_date'] for row in cursor.fetchall()]
+        streak = 0
+        today_dt = datetime.now().date()
+        for i, d in enumerate(dates):
+            expected = (today_dt - timedelta(days=i)).strftime('%Y-%m-%d')
+            if d == expected:
+                streak += 1
+            else:
+                break
+
+        cursor.execute('''
+            SELECT COUNT(*) as total_days, COALESCE(SUM(study_minutes), 0) as total_minutes
+            FROM study_checkins WHERE user_id = ?
+        ''', (user_id,))
+        agg = cursor.fetchone()
+
+    return jsonify({
+        'success': True,
+        'checkin_id': checkin_id,
+        'is_first_today': is_first_today,
+        'streak': streak,
+        'total_days': agg['total_days'],
+        'total_minutes': agg['total_minutes']
+    })
+
+
+@app.route('/api/checkin/today', methods=['GET'])
+@api_response
+def get_today_checkin():
+    """获取今日打卡状态"""
+    user_id = get_user_id()
+    today = datetime.now().strftime('%Y-%m-%d')
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM study_checkins WHERE user_id = ? AND checkin_date = ?', (user_id, today))
+        row = cursor.fetchone()
+        if row:
+            return jsonify(dict(row))
+        return jsonify({'checked_in': False, 'study_minutes': 0})
+
+
+@app.route('/api/checkin/streak', methods=['GET'])
+@api_response
+def get_checkin_streak():
+    """获取连续打卡统计"""
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT checkin_date FROM study_checkins
+            WHERE user_id = ?
+            ORDER BY checkin_date DESC LIMIT 365
+        ''', (user_id,))
+        dates = [row['checkin_date'] for row in cursor.fetchall()]
+
+        today_dt = datetime.now().date()
+        current_streak = 0
+        for i, d in enumerate(dates):
+            expected = (today_dt - timedelta(days=i)).strftime('%Y-%m-%d')
+            if d == expected:
+                current_streak += 1
+            else:
+                break
+
+        longest = 0
+        if dates:
+            prev = None
+            run = 0
+            for d in sorted(dates):
+                if prev:
+                    diff = (datetime.strptime(d, '%Y-%m-%d').date() - prev).days
+                    if diff == 1:
+                        run += 1
+                    else:
+                        run = 1
+                else:
+                    run = 1
+                longest = max(longest, run)
+                prev = datetime.strptime(d, '%Y-%m-%d').date()
+
+        cursor.execute('''
+            SELECT COUNT(*) as total, COALESCE(SUM(study_minutes),0) as total_min,
+                   MAX(checkin_date) as last_date
+            FROM study_checkins WHERE user_id = ?
+        ''', (user_id,))
+        agg = cursor.fetchone()
+
+    return jsonify({
+        'current_streak': current_streak,
+        'longest_streak': longest,
+        'total_checkin_days': agg['total'],
+        'total_study_minutes': agg['total_min'],
+        'last_checkin_date': agg['last_date']
+    })
+
+
+@app.route('/api/checkin/calendar', methods=['GET'])
+@api_response
+def get_checkin_calendar():
+    """获取指定月份的打卡日历"""
+    user_id = get_user_id()
+    month = request.args.get('month', datetime.now().strftime('%Y-%m'))
+    try:
+        datetime.strptime(month, '%Y-%m')
+    except ValueError:
+        return jsonify({'error': 'Invalid month format, use YYYY-MM'}), 400
+
+    start = f'{month}-01'
+    end = f'{month}-31'
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT checkin_date, study_minutes, note
+            FROM study_checkins
+            WHERE user_id = ? AND checkin_date BETWEEN ? AND ?
+            ORDER BY checkin_date
+        ''', (user_id, start, end))
+        records = [dict(row) for row in cursor.fetchall()]
+    return jsonify({'month': month, 'records': records})
+
+
+@app.route('/api/study-session', methods=['POST'])
+@api_response
+def record_study_session():
+    """记录一次学习会话（开始+结束+时长）"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    module = sanitize_string(data.get('module', ''), 50)
+    start_time = data.get('start_time')
+    end_time = data.get('end_time')
+    duration_minutes = safe_int(data.get('duration_minutes', 0), 0)
+
+    if not start_time:
+        start_time = datetime.now().isoformat()
+    if not end_time:
+        end_time = datetime.now().isoformat()
+    if duration_minutes <= 0:
+        try:
+            duration_minutes = int((datetime.fromisoformat(end_time) - datetime.fromisoformat(start_time)).total_seconds() / 60)
+        except Exception:
+            duration_minutes = 0
+    duration_minutes = max(0, min(1440, duration_minutes))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO study_sessions (user_id, module, start_time, end_time, duration_minutes)
+            VALUES (?, ?, ?, ?, ?)
+        ''', (user_id, module, start_time, end_time, duration_minutes))
+        session_id = cursor.lastrowid
+        conn.commit()
+
+    return jsonify({'success': True, 'session_id': session_id, 'duration_minutes': duration_minutes})
+
+
+@app.route('/api/study-session/stats', methods=['GET'])
+@api_response
+def get_study_session_stats():
+    """学习时长统计（按日/周/月聚合）"""
+    user_id = get_user_id()
+    days = safe_int(request.args.get('days', 30), 30)
+    days = max(1, min(365, days))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT DATE(start_time) as study_date,
+                   SUM(duration_minutes) as total_minutes,
+                   COUNT(*) as session_count
+            FROM study_sessions
+            WHERE user_id = ? AND start_time >= ?
+            GROUP BY DATE(start_time)
+            ORDER BY study_date
+        ''', (user_id, (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')))
+        daily = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT module, SUM(duration_minutes) as total_minutes, COUNT(*) as cnt
+            FROM study_sessions
+            WHERE user_id = ? AND start_time >= ?
+            GROUP BY module ORDER BY total_minutes DESC
+        ''', (user_id, (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')))
+        by_module = [dict(row) for row in cursor.fetchall()]
+
+        total_minutes = sum(d['total_minutes'] or 0 for d in daily)
+        active_days = len(daily)
+
+    return jsonify({
+        'days': days,
+        'total_minutes': total_minutes,
+        'active_days': active_days,
+        'avg_minutes_per_day': round(total_minutes / days, 1) if days else 0,
+        'avg_minutes_per_active_day': round(total_minutes / active_days, 1) if active_days else 0,
+        'daily_records': daily,
+        'by_module': by_module
+    })
+
+
+# ==================== 自定义题目（手动录入/导入） ====================
+
+@app.route('/api/custom-questions', methods=['POST'])
+@api_response
+def create_custom_question():
+    """手动录入题目"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    question_text = sanitize_string(data.get('question_text', ''), 5000)
+    question_type = sanitize_string(data.get('question_type', 'single_choice'), 30) or 'single_choice'
+    correct_answer = sanitize_string(data.get('correct_answer', ''), 500)
+    explanation = sanitize_string(data.get('explanation', ''), 5000)
+    category = sanitize_string(data.get('category', ''), 100)
+    kp_id = data.get('kp_id')
+    source = sanitize_string(data.get('source', 'manual'), 30) or 'manual'
+
+    if not question_text:
+        return jsonify({'error': '题目内容不能为空'}), 400
+    if not correct_answer:
+        return jsonify({'error': '正确答案不能为空'}), 400
+
+    options = data.get('options')
+    options_json = json.dumps(options, ensure_ascii=False) if options is not None else None
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO custom_questions
+            (user_id, question_text, question_type, options, correct_answer, explanation, category, kp_id, source)
+            VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (user_id, question_text, question_type, options_json, correct_answer, explanation, category, kp_id, source))
+        qid = cursor.lastrowid
+        cursor.execute('SELECT * FROM custom_questions WHERE id = ?', (qid,))
+        row = dict(cursor.fetchone())
+        conn.commit()
+
+    return jsonify({'success': True, 'question': row})
+
+
+@app.route('/api/custom-questions', methods=['GET'])
+@api_response
+def list_custom_questions():
+    """列表查询自定义题目"""
+    user_id = get_user_id()
+    page = safe_int(request.args.get('page', 1), 1)
+    limit = safe_int(request.args.get('limit', 20), 20)
+    limit = max(1, min(100, limit))
+    offset = (page - 1) * limit
+    category = request.args.get('category', '').strip()
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        where_sql = 'WHERE user_id = ?'
+        params = [user_id]
+        if category:
+            like_pattern = sanitize_search_query(category)
+            where_sql += ' AND category LIKE ? ESCAPE \'\\\''
+            params.append(f'%{like_pattern}%')
+
+        cursor.execute(f'SELECT COUNT(*) FROM custom_questions {where_sql}', params)
+        total = cursor.fetchone()[0]
+
+        cursor.execute(f'''
+            SELECT * FROM custom_questions {where_sql}
+            ORDER BY created_at DESC LIMIT ? OFFSET ?
+        ''', params + [limit, offset])
+        items = [dict(row) for row in cursor.fetchall()]
+
+        cursor.execute('SELECT DISTINCT category FROM custom_questions WHERE user_id = ? AND category IS NOT NULL', (user_id,))
+        categories = [row['category'] for row in cursor.fetchall()]
+
+    return jsonify({'items': items, 'total': total, 'page': page, 'limit': limit, 'categories': categories})
+
+
+@app.route('/api/custom-questions/<int:qid>', methods=['GET'])
+@api_response
+def get_custom_question(qid):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM custom_questions WHERE id = ? AND user_id = ?', (qid, user_id))
+        row = cursor.fetchone()
+        if not row:
+            return jsonify({'error': 'Question not found'}), 404
+        return jsonify(dict(row))
+
+
+@app.route('/api/custom-questions/<int:qid>', methods=['PUT'])
+@api_response
+def update_custom_question(qid):
+    user_id = request.get_json().get('user_id', 'default_user') if request.get_json() else 'default_user'
+    user_id = user_id or 'default_user'
+    data = request.get_json() or {}
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT id FROM custom_questions WHERE id = ? AND user_id = ?', (qid, user_id))
+        if not cursor.fetchone():
+            return jsonify({'error': 'Question not found'}), 404
+
+        updates = []
+        params = []
+        for field, max_len in [('question_text', 5000), ('question_type', 30), ('correct_answer', 500),
+                                ('explanation', 5000), ('category', 100), ('source', 30)]:
+            if field in data:
+                updates.append(f'{field} = ?')
+                params.append(sanitize_string(data[field], max_len))
+        if 'options' in data:
+            updates.append('options = ?')
+            params.append(json.dumps(data['options'], ensure_ascii=False) if data['options'] is not None else None)
+        if 'kp_id' in data:
+            updates.append('kp_id = ?')
+            params.append(data['kp_id'])
+
+        if not updates:
+            return jsonify({'error': 'No fields to update'}), 400
+
+        params.append(qid)
+        params.append(user_id)
+        cursor.execute(f'UPDATE custom_questions SET {", ".join(updates)} WHERE id = ? AND user_id = ?', params)
+        cursor.execute('SELECT * FROM custom_questions WHERE id = ?', (qid,))
+        row = dict(cursor.fetchone())
+        conn.commit()
+
+    return jsonify({'success': True, 'question': row})
+
+
+@app.route('/api/custom-questions/<int:qid>', methods=['DELETE'])
+@api_response
+def delete_custom_question(qid):
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('DELETE FROM custom_questions WHERE id = ? AND user_id = ?', (qid, user_id))
+        deleted = cursor.rowcount
+        conn.commit()
+    if deleted == 0:
+        return jsonify({'error': 'Question not found'}), 404
+    return jsonify({'success': True, 'deleted': deleted})
+
+
+@app.route('/api/custom-questions/import', methods=['POST'])
+@api_response
+def import_custom_questions():
+    """批量导入题目（JSON 数组）"""
+    data = request.get_json() or {}
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    questions = data.get('questions', [])
+    if not isinstance(questions, list) or len(questions) == 0:
+        return jsonify({'error': 'questions must be a non-empty array'}), 400
+    if len(questions) > 500:
+        return jsonify({'error': 'Cannot import more than 500 questions at once'}), 400
+
+    imported = 0
+    errors = []
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        for idx, q in enumerate(questions):
+            try:
+                if not isinstance(q, dict):
+                    errors.append(f'Item {idx}: not an object')
+                    continue
+                question_text = sanitize_string(q.get('question_text', ''), 5000)
+                correct_answer = sanitize_string(q.get('correct_answer', ''), 500)
+                if not question_text or not correct_answer:
+                    errors.append(f'Item {idx}: missing question_text or correct_answer')
+                    continue
+                question_type = sanitize_string(q.get('question_type', 'single_choice'), 30) or 'single_choice'
+                explanation = sanitize_string(q.get('explanation', ''), 5000)
+                category = sanitize_string(q.get('category', ''), 100)
+                source = sanitize_string(q.get('source', 'import'), 30) or 'import'
+                options = q.get('options')
+                options_json = json.dumps(options, ensure_ascii=False) if options is not None else None
+                kp_id = q.get('kp_id')
+
+                cursor.execute('''
+                    INSERT INTO custom_questions
+                    (user_id, question_text, question_type, options, correct_answer, explanation, category, kp_id, source)
+                    VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                ''', (user_id, question_text, question_type, options_json, correct_answer, explanation, category, kp_id, source))
+                imported += 1
+            except Exception as e:
+                errors.append(f'Item {idx}: {str(e)}')
+        conn.commit()
+
+    return jsonify({'success': True, 'imported': imported, 'errors': errors, 'total': len(questions)})
 
 
 if __name__ == '__main__':
