@@ -5,7 +5,9 @@ import {
   getStatsCognition,
   getStatsDaily,
   getStatsCategory,
-  getRepracticeConversion
+  getRepracticeConversion,
+  getReviewQueue,
+  getReportDownloadUrl
 } from '../utils/api';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -22,6 +24,7 @@ function Dashboard() {
   const [dailyStats, setDailyStats] = useState([]);
   const [categoryStats, setCategoryStats] = useState([]);
   const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
+  const [reviewSummary, setReviewSummary] = useState({ today_count: 0, overdue_count: 0, total_pending: 0 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -32,12 +35,13 @@ function Dashboard() {
   const fetchData = async () => {
     try {
       setError(null);
-      const [statsData, cognitionData, dailyData, categoryData, conversionData] = await Promise.all([
+      const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData] = await Promise.all([
         getStatsOverview(),
         getStatsCognition(),
         getStatsDaily(7),
         getStatsCategory(),
-        getRepracticeConversion(7, 72)
+        getRepracticeConversion(7, 72),
+        getReviewQueue(1).catch(() => ({ stats: {} }))
       ]);
 
       setStats(statsData);
@@ -45,12 +49,23 @@ function Dashboard() {
       setDailyStats(dailyData.daily_stats || dailyData.daily || []);
       setCategoryStats(categoryData.categories || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
+      setReviewSummary(reviewData.stats || { today_count: 0, overdue_count: 0, total_pending: 0 });
     } catch (error) {
       console.error('获取数据失败:', error);
       setError(error.message || '获取数据失败');
     } finally {
       setLoading(false);
     }
+  };
+
+  const handleDownloadReport = (format) => {
+    const url = getReportDownloadUrl(format);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `learning_report.${format}`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   if (loading) {
@@ -290,11 +305,51 @@ function Dashboard() {
         </div>
       </div>
 
-      <div className="section-card">
-        <h2 className="section-title">快捷操作</h2>
-        <div style={{ display: 'flex', gap: '1rem', flexWrap: 'wrap' }}>
-          <Link to="/practice?mode=recommend" className="btn btn-primary">🔥 攻克薄弱点 (智能推荐)</Link>
-          <Link to="/questions" className="btn btn-secondary">查看错题库</Link>
+      <div className="section-card" style={{ background: 'linear-gradient(135deg, #fff 0%, #f6f9ff 100%)', border: '1px solid #bbdefb' }}>
+        <h2 className="section-title">🎯 智能学习中心</h2>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(200px, 1fr))', gap: '0.75rem', marginTop: '1rem' }}>
+          <Link to="/review" className="btn btn-primary" style={{ justifyContent: 'flex-start' }}>
+            🔁 今日复习
+            {reviewSummary.total_pending > 0 && (
+              <span style={{ marginLeft: 'auto', background: '#fff', color: '#f44336', padding: '0.1rem 0.5rem', borderRadius: '10px', fontSize: '0.75rem', fontWeight: 700 }}>
+                {reviewSummary.total_pending}
+              </span>
+            )}
+          </Link>
+          <Link to="/learning-path" className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>
+            🧭 学习路径推荐
+          </Link>
+          <Link to="/diagnosis" className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>
+            🔬 错题归因诊断
+          </Link>
+          <Link to="/radar" className="btn btn-secondary" style={{ justifyContent: 'flex-start' }}>
+            🕸️ 能力雷达图
+          </Link>
+        </div>
+        <div style={{ display: 'flex', gap: '0.75rem', flexWrap: 'wrap', marginTop: '0.75rem' }}>
+          <Link to="/practice?mode=recommend" className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+            🔥 攻克薄弱点
+          </Link>
+          <Link to="/questions" className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+            📚 错题库
+          </Link>
+          <Link to="/report" className="btn btn-secondary" style={{ padding: '0.5rem 1rem', fontSize: '0.875rem' }}>
+            📊 学习报告
+          </Link>
+          <button
+            onClick={() => handleDownloadReport('md')}
+            className="btn btn-secondary"
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+          >
+            ⬇ 一键导出报告 (MD)
+          </button>
+          <button
+            onClick={() => handleDownloadReport('json')}
+            className="btn btn-secondary"
+            style={{ padding: '0.5rem 1rem', fontSize: '0.875rem', cursor: 'pointer' }}
+          >
+            ⬇ 导出 JSON
+          </button>
         </div>
       </div>
     </div>

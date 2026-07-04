@@ -604,3 +604,15 @@ export const getErrorDiagnosisReport = (days = 30) => {
 export const getLearningPathRecommend = (limit = 5) => {
   return fetchAPI(`/api/learning-path/recommend?limit=${limit}`);
 };
+
+// ==================== 学习报告 ====================
+
+export const getLearningReport = (days = 30) => {
+  return fetchAPI(`/api/report/learning?days=${days}`);
+};
+
+export const getReportDownloadUrl = (format = 'json') => {
+  const userId = getUserId();
+  return `${API_BASE}/api/report/export?format=${format}&user_id=${encodeURIComponent(userId)}`;
+};
+

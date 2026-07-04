@@ -6289,6 +6289,283 @@ def get_learning_path_recommend():
     })
 
 
+@app.route('/api/report/learning', methods=['GET'])
+@api_response
+def get_learning_report():
+    """综合学习报告：聚合概览、掌握度、错题归因、薄弱点、趋势、建议"""
+    user_id = get_user_id()
+    days = safe_int(request.args.get('days', 30), 30)
+    days = max(1, min(365, days))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 1. 概览
+        cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user_id,))
+        total_wrong = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND is_mastered = 1', (user_id,))
+        mastered = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ?', (user_id,))
+        practice_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ? AND is_correct = 1', (user_id,))
+        correct_count = cursor.fetchone()[0]
+        accuracy = round((correct_count / practice_count) * 100, 2) if practice_count > 0 else 0
+        mastery_rate = round((mastered / total_wrong) * 100, 2) if total_wrong > 0 else 0
+
+        # 学习连续天数
+        cursor.execute('''
+            SELECT COUNT(*) FROM study_checkins WHERE user_id = ?
+        ''', (user_id,))
+        total_checkin_days = cursor.fetchone()[0]
+        cursor.execute('''
+            SELECT MAX(checkin_date) as last, MIN(checkin_date) as first
+            FROM study_checkins WHERE user_id = ?
+        ''', (user_id,))
+        row = cursor.fetchone()
+        last_checkin = row['last'] if row else None
+        today_checkin = 0
+        cursor.execute('''
+            SELECT COUNT(*) FROM study_checkins
+            WHERE user_id = ? AND checkin_date = DATE('now')
+        ''', (user_id,))
+        today_checkin = cursor.fetchone()[0]
+
+        # 2. 章节掌握度（顶层章节）
+        cursor.execute('''
+            WITH RECURSIVE descendants AS (
+                SELECT id, parent_id FROM knowledge_points WHERE id = kp.id
+                UNION ALL
+                SELECT kp2.id, kp2.parent_id FROM knowledge_points kp2
+                JOIN descendants d ON kp2.parent_id = d.id
+            )
+            SELECT kp.id, kp.name,
+                   (SELECT COUNT(*) FROM descendants) as kp_count,
+                   uc.mastery_score
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            WHERE kp.parent_id IS NULL
+            ORDER BY kp.id
+        ''', (user_id,))
+        chapters = []
+        for r in cursor.fetchall():
+            chapters.append({
+                'name': r['name'],
+                'knowledge_point_count': r['kp_count'],
+                'mastery_score': r['mastery_score']
+            })
+
+        # 3. 错题分类聚合
+        cursor.execute('''
+            SELECT category, COUNT(*) as cnt,
+                   SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered
+            FROM wrong_questions
+            WHERE user_id = ? AND category != ''
+            GROUP BY category ORDER BY cnt DESC
+        ''', (user_id,))
+        by_category = [dict(r) for r in cursor.fetchall()]
+
+        # 4. 错题标签聚合
+        cursor.execute('''
+            SELECT et.name as tag, et.category, COUNT(qet.question_id) as cnt
+            FROM question_error_tags qet
+            JOIN error_tags et ON qet.tag_id = et.id
+            JOIN wrong_questions wq ON qet.question_id = wq.id
+            WHERE wq.user_id = ?
+            GROUP BY et.id ORDER BY cnt DESC LIMIT 10
+        ''', (user_id,))
+        top_tags = [dict(r) for r in cursor.fetchall()]
+
+        # 5. 薄弱知识点 Top 5
+        cursor.execute('''
+            SELECT kp.name, uc.mastery_score,
+                   COUNT(wq.id) as wrong_count,
+                   SUM(CASE WHEN wq.is_mastered = 0 THEN 1 ELSE 0 END) as pending
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
+            LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
+            WHERE kp.parent_id IS NOT NULL
+            GROUP BY kp.id
+            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
+            ORDER BY pending DESC, uc.mastery_score ASC
+            LIMIT 5
+        ''', (user_id, user_id))
+        weak_kps = [dict(r) for r in cursor.fetchall()]
+
+        # 6. 近 N 天学习趋势
+        cursor.execute('''
+            SELECT DATE(attempted_at) as date,
+                   COUNT(*) as practiced,
+                   SUM(is_correct) as correct
+            FROM practice_attempts
+            WHERE user_id = ? AND attempted_at >= DATE('now', ?)
+            GROUP BY DATE(attempted_at) ORDER BY date
+        ''', (user_id, f'-{days} days'))
+        trend = []
+        for r in cursor.fetchall():
+            practiced = r['practiced'] or 0
+            correct = r['correct'] or 0
+            trend.append({
+                'date': r['date'],
+                'practiced': practiced,
+                'correct': correct,
+                'correct_rate': round((correct / practiced) * 100, 2) if practiced > 0 else 0
+            })
+
+        # 7. 模考统计
+        cursor.execute('''
+            SELECT COUNT(*) as total, AVG(score) as avg_score, MAX(score) as max_score
+            FROM mock_exams WHERE user_id = ? AND status = 'submitted'
+        ''', (user_id,))
+        exam_row = cursor.fetchone()
+        exam_stats = {
+            'total_exams': exam_row['total'] if exam_row else 0,
+            'avg_score': round(exam_row['avg_score'], 2) if exam_row and exam_row['avg_score'] else 0,
+            'max_score': exam_row['max_score'] if exam_row else 0
+        }
+
+    # 8. 生成建议
+    suggestions = []
+    if mastery_rate < 50 and total_wrong > 0:
+        suggestions.append(f'当前错题掌握率仅 {mastery_rate}%，建议每日完成今日复习队列中的题目。')
+    if accuracy < 70 and practice_count > 10:
+        suggestions.append(f'练习正确率 {accuracy}% 偏低，重点攻克错题诊断中的高频错误类型。')
+    if weak_kps:
+        suggestions.append(f'发现 {len(weak_kps)} 个薄弱知识点，按学习路径推荐顺序逐个攻克。')
+    if not today_checkin:
+        suggestions.append('今日尚未打卡，坚持每日学习是通关关键。')
+    if not suggestions:
+        suggestions.append('学习状态良好，继续保持当前节奏，注意考前模考冲刺。')
+
+    report = {
+        'generated_at': datetime.now().strftime('%Y-%m-%d %H:%M:%S'),
+        'period_days': days,
+        'overview': {
+            'total_wrong_questions': total_wrong,
+            'mastered': mastered,
+            'unmastered': total_wrong - mastered,
+            'mastery_rate': mastery_rate,
+            'practice_count': practice_count,
+            'accuracy': accuracy,
+            'total_checkin_days': total_checkin_days,
+            'last_checkin': last_checkin,
+            'today_checkin': today_checkin > 0
+        },
+        'chapters': chapters,
+        'error_by_category': by_category,
+        'top_error_tags': top_tags,
+        'weak_knowledge_points': weak_kps,
+        'trend': trend,
+        'exam_stats': exam_stats,
+        'suggestions': suggestions
+    }
+    return jsonify(report)
+
+
+@app.route('/api/report/export', methods=['GET'])
+@api_response
+def export_learning_report():
+    """导出综合学习报告：支持 json / md 格式下载"""
+    fmt = (request.args.get('format') or 'json').lower()
+    if fmt not in ('json', 'md'):
+        fmt = 'json'
+
+    # 复用学习报告逻辑
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user_id,))
+        total_wrong = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND is_mastered = 1', (user_id,))
+        mastered = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ?', (user_id,))
+        practice_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ? AND is_correct = 1', (user_id,))
+        correct_count = cursor.fetchone()[0]
+        cursor.execute('SELECT COUNT(*) FROM study_checkins WHERE user_id = ?', (user_id,))
+        total_checkin_days = cursor.fetchone()[0]
+        cursor.execute('''
+            SELECT category, COUNT(*) as cnt FROM wrong_questions
+            WHERE user_id = ? AND category != '' GROUP BY category ORDER BY cnt DESC
+        ''', (user_id,))
+        by_category = [dict(r) for r in cursor.fetchall()]
+        cursor.execute('''
+            SELECT kp.name, uc.mastery_score, COUNT(wq.id) as wrong_count
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
+            LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
+            WHERE kp.parent_id IS NOT NULL
+            GROUP BY kp.id HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
+            ORDER BY wrong_count DESC LIMIT 5
+        ''', (user_id, user_id))
+        weak_kps = [dict(r) for r in cursor.fetchall()]
+
+    accuracy = round((correct_count / practice_count) * 100, 2) if practice_count > 0 else 0
+    mastery_rate = round((mastered / total_wrong) * 100, 2) if total_wrong > 0 else 0
+    generated_at = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+
+    if fmt == 'json':
+        payload = {
+            'generated_at': generated_at,
+            'overview': {
+                'total_wrong_questions': total_wrong,
+                'mastered': mastered,
+                'mastery_rate': mastery_rate,
+                'practice_count': practice_count,
+                'accuracy': accuracy,
+                'total_checkin_days': total_checkin_days
+            },
+            'error_by_category': by_category,
+            'weak_knowledge_points': weak_kps
+        }
+        resp = make_response(json.dumps(payload, ensure_ascii=False, indent=2))
+        resp.headers['Content-Type'] = 'application/json; charset=utf-8'
+        resp.headers['Content-Disposition'] = 'attachment; filename="learning_report.json"'
+        return resp
+
+    # Markdown 格式
+    lines = []
+    lines.append('# 软考系统架构师 - 学习报告\n')
+    lines.append(f'> 生成时间：{generated_at}\n\n')
+    lines.append('## 一、学习概览\n')
+    lines.append(f'- 错题总数：**{total_wrong}**')
+    lines.append(f'- 已掌握：**{mastered}**（掌握率 {mastery_rate}%）')
+    lines.append(f'- 未掌握：**{total_wrong - mastered}**')
+    lines.append(f'- 练习总次数：**{practice_count}**，正确率 **{accuracy}%**')
+    lines.append(f'- 累计打卡：**{total_checkin_days}** 天\n')
+    lines.append('## 二、错题分类分布\n')
+    if by_category:
+        lines.append('| 分类 | 错题数 |')
+        lines.append('| --- | --- |')
+        for c in by_category:
+            lines.append(f"| {c['category']} | {c['cnt']} |")
+    else:
+        lines.append('暂无分类数据')
+    lines.append('\n## 三、薄弱知识点 Top 5\n')
+    if weak_kps:
+        lines.append('| 知识点 | 掌握度 | 错题数 |')
+        lines.append('| --- | --- | --- |')
+        for kp in weak_kps:
+            score = kp['mastery_score'] if kp['mastery_score'] is not None else '未学习'
+            lines.append(f"| {kp['name']} | {score} | {kp['wrong_count']} |")
+    else:
+        lines.append('暂无薄弱知识点')
+    lines.append('\n## 四、改进建议\n')
+    if mastery_rate < 50 and total_wrong > 0:
+        lines.append(f'- 当前掌握率 {mastery_rate}% 偏低，建议坚持每日复习队列')
+    if accuracy < 70 and practice_count > 10:
+        lines.append(f'- 练习正确率 {accuracy}%，需重点攻克高频错题')
+    if not weak_kps:
+        lines.append('- 暂无明显薄弱点，保持学习节奏')
+    lines.append('\n---\n*由软考错题分析系统自动生成*\n')
+
+    resp = make_response('\n'.join(lines))
+    resp.headers['Content-Type'] = 'text/markdown; charset=utf-8'
+    resp.headers['Content-Disposition'] = 'attachment; filename="learning_report.md"'
+    return resp
+
+
 if __name__ == '__main__':
     ensure_schema()
     app.run(port=5002, debug=True)

@@ -23,6 +23,7 @@ import ReviewQueue from './components/ReviewQueue.jsx'
 import AbilityRadar from './components/AbilityRadar.jsx'
 import ErrorDiagnosis from './components/ErrorDiagnosis.jsx'
 import LearningPath from './components/LearningPath.jsx'
+import LearningReport from './components/LearningReport.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -48,6 +49,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/radar" element={<AbilityRadar />} />
           <Route path="/diagnosis" element={<ErrorDiagnosis />} />
           <Route path="/learning-path" element={<LearningPath />} />
+          <Route path="/report" element={<LearningReport />} />
         </Routes>
       </App>
     </Router>

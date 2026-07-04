@@ -16,6 +16,7 @@ function App({ children }) {
     { path: '/radar', label: '能力雷达', icon: '🕸️' },
     { path: '/diagnosis', label: '错题诊断', icon: '🔬' },
     { path: '/learning-path', label: '学习路径', icon: '🧭' },
+    { path: '/report', label: '学习报告', icon: '📊' },
     { path: '/textbook', label: '教材学习', icon: '📖' },
     { path: '/knowledge', label: '知识图谱', icon: '🌳' },
     { path: '/questions', label: '错题库', icon: '📚' },
