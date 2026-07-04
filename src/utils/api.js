@@ -592,3 +592,15 @@ export const getReviewUpcoming = (days = 7) => {
 export const getAbilityRadar = () => {
   return fetchAPI('/api/stats/radar');
 };
+
+// ==================== 错题归因诊断 ====================
+
+export const getErrorDiagnosisReport = (days = 30) => {
+  return fetchAPI(`/api/error-diagnosis/report?days=${days}`);
+};
+
+// ==================== 学习路径推荐 ====================
+
+export const getLearningPathRecommend = (limit = 5) => {
+  return fetchAPI(`/api/learning-path/recommend?limit=${limit}`);
+};

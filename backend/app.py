@@ -6074,6 +6074,221 @@ def get_ability_radar():
     })
 
 
+# ==================== 错题归因诊断 ====================
+
+@app.route('/api/error-diagnosis/report', methods=['GET'])
+@api_response
+def get_error_diagnosis_report():
+    """错题归因诊断报告：按错误类型/章节/知识点维度聚合"""
+    user_id = get_user_id()
+    days = safe_int(request.args.get('days', 30), 30)
+    days = max(1, min(365, days))
+    since = (datetime.now() - timedelta(days=days)).strftime('%Y-%m-%d')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 1. 按错误标签聚合（concept/memory/calculation/reading/logic）
+        cursor.execute('''
+            SELECT et.category, et.name, COUNT(*) as cnt
+            FROM question_error_tags qet
+            JOIN error_tags et ON qet.tag_id = et.id
+            JOIN wrong_questions wq ON qet.question_id = wq.id
+            WHERE wq.user_id = ? AND wq.created_at >= ?
+            GROUP BY et.category, et.id
+            ORDER BY cnt DESC
+        ''', (user_id, since))
+        by_tag_rows = cursor.fetchall()
+        by_category = {}
+        by_tag = []
+        for row in by_tag_rows:
+            cat = row['category']
+            if cat not in by_category:
+                by_category[cat] = {'count': 0, 'tags': []}
+            by_category[cat]['count'] += row['cnt']
+            by_category[cat]['tags'].append({'name': row['name'], 'count': row['cnt']})
+            by_tag.append(dict(row))
+
+        # 2. 按章节聚合（未掌握错题数）
+        cursor.execute('''
+            SELECT category, COUNT(*) as total,
+                   SUM(CASE WHEN is_mastered = 0 THEN 1 ELSE 0 END) as pending,
+                   AVG(wrong_count) as avg_wrong_count
+            FROM wrong_questions
+            WHERE user_id = ? AND created_at >= ? AND category != ''
+            GROUP BY category
+            ORDER BY pending DESC
+            LIMIT 10
+        ''', (user_id, since))
+        by_chapter = [dict(row) for row in cursor.fetchall()]
+
+        # 3. 高频错题（错误次数≥3 且未掌握）
+        cursor.execute('''
+            SELECT id, question, category, wrong_count, srs_stage, next_review_time
+            FROM wrong_questions
+            WHERE user_id = ? AND wrong_count >= 3 AND is_mastered = 0
+            ORDER BY wrong_count DESC, next_review_time ASC
+            LIMIT 5
+        ''', (user_id,))
+        hot_questions = [dict(row) for row in cursor.fetchall()]
+
+        # 4. 总览统计
+        cursor.execute('''
+            SELECT
+                COUNT(*) as total_wrong,
+                SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered,
+                SUM(CASE WHEN is_mastered = 0 THEN 1 ELSE 0 END) as pending,
+                AVG(wrong_count) as avg_wrong_per_q
+            FROM wrong_questions
+            WHERE user_id = ? AND created_at >= ?
+        ''', (user_id, since))
+        overview = dict(cursor.fetchone())
+
+        # 5. 时间趋势（近 N 天每日错题数）
+        cursor.execute('''
+            SELECT DATE(created_at) as date, COUNT(*) as count
+            FROM wrong_questions
+            WHERE user_id = ? AND created_at >= ?
+            GROUP BY DATE(created_at)
+            ORDER BY date
+        ''', (user_id, since))
+        trend = [dict(row) for row in cursor.fetchall()]
+
+    # 诊断建议
+    suggestions = []
+    cat_order = sorted(by_category.items(), key=lambda x: x[1]['count'], reverse=True)
+    if cat_order:
+        top_cat, top_info = cat_order[0]
+        cat_advice = {
+            'concept': '概念类错误最多，建议回归教材梳理核心定义，使用知识图谱确认关联',
+            'memory': '记忆类错误突出，建议加强间隔重复，重点记忆公式/术语',
+            'calculation': '计算类错误较多，建议多做真题训练，注意单位与公式套用',
+            'reading': '审题类错误频繁，建议做题时先标记关键词，避免漏看条件',
+            'logic': '逻辑推理错误较多，建议练习因果分析与流程图梳理'
+        }
+        suggestions.append({
+            'type': 'top_category',
+            'message': cat_advice.get(top_cat, f'{top_cat} 类错误较多，建议针对性强化'),
+            'detail': top_info
+        })
+
+    if hot_questions:
+        suggestions.append({
+            'type': 'hot_questions',
+            'message': f'有 {len(hot_questions)} 道题错误≥3次仍未掌握，建议优先攻克',
+            'detail': [{'id': q['id'], 'question': q['question'][:80] if q['question'] else '', 'wrong_count': q['wrong_count']} for q in hot_questions]
+        })
+
+    if overview['pending'] and overview['pending'] > overview['total_wrong'] * 0.6:
+        suggestions.append({
+            'type': 'low_mastery',
+            'message': f'未掌握错题占比 {round(overview["pending"] / overview["total_wrong"] * 100)}%，复习效率偏低，建议用 SRS 队列系统化复习',
+            'detail': {'pending': overview['pending'], 'total': overview['total_wrong']}
+        })
+
+    return jsonify({
+        'days': days,
+        'overview': {
+            'total_wrong': overview['total_wrong'] or 0,
+            'mastered': overview['mastered'] or 0,
+            'pending': overview['pending'] or 0,
+            'mastered_rate': round((overview['mastered'] or 0) / (overview['total_wrong'] or 1) * 100, 1),
+            'avg_wrong_per_q': round(overview['avg_wrong_per_q'] or 0, 2)
+        },
+        'by_category': [{'category': k, 'count': v['count'], 'tags': v['tags']} for k, v in cat_order],
+        'by_chapter': by_chapter,
+        'hot_questions': hot_questions,
+        'trend': trend,
+        'suggestions': suggestions
+    })
+
+
+# ==================== 学习路径推荐 ====================
+
+@app.route('/api/learning-path/recommend', methods=['GET'])
+@api_response
+def get_learning_path_recommend():
+    """基于薄弱点的智能学习路径推荐"""
+    user_id = get_user_id()
+    limit = safe_int(request.args.get('limit', 5), 5)
+    limit = max(1, min(20, limit))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 1. 找出掌握度最低且未掌握错题最多的知识点
+        cursor.execute('''
+            SELECT kp.id, kp.name, kp.category, kp.parent_id,
+                   uc.mastery_score, uc.stability,
+                   COUNT(wq.id) as wrong_count,
+                   SUM(CASE WHEN wq.is_mastered = 0 THEN 1 ELSE 0 END) as pending_wrong
+            FROM knowledge_points kp
+            LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
+            LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
+            LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
+            WHERE kp.parent_id IS NOT NULL
+            GROUP BY kp.id
+            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
+            ORDER BY pending_wrong DESC, (uc.mastery_score IS NULL) DESC, uc.mastery_score ASC
+            LIMIT ?
+        ''', (user_id, user_id, limit * 2))
+        weak_kps = [dict(row) for row in cursor.fetchall()]
+
+        # 2. 对每个薄弱知识点，找关联教材章节与相邻知识点
+        recommendations = []
+        for kp in weak_kps[:limit]:
+            rec = {
+                'knowledge_point': kp,
+                'reason': '',
+                'actions': []
+            }
+
+            if kp['pending_wrong'] and kp['pending_wrong'] > 0:
+                rec['reason'] = f'有 {kp["pending_wrong"]} 道错题未掌握'
+                rec['actions'].append({'type': 'review', 'label': '复习错题', 'target': '/review'})
+            elif kp['mastery_score'] is None:
+                rec['reason'] = '尚未学习此知识点'
+                rec['actions'].append({'type': 'learn', 'label': '学习教材', 'target': '/textbook'})
+            elif kp['mastery_score'] < 60:
+                rec['reason'] = f'掌握度仅 {kp["mastery_score"]}%，需加强'
+                rec['actions'].append({'type': 'practice', 'label': '专项练习', 'target': '/practice'})
+
+            # 找父章节
+            if kp['parent_id']:
+                cursor.execute('SELECT id, name FROM knowledge_points WHERE id = ?', (kp['parent_id'],))
+                parent = cursor.fetchone()
+                if parent:
+                    rec['parent_chapter'] = dict(parent)
+
+            # 找同级相邻知识点（同 parent，已掌握的作为参考）
+            if kp['parent_id']:
+                cursor.execute('''
+                    SELECT name, mastery_score FROM knowledge_points kp2
+                    LEFT JOIN user_cognition uc ON kp2.id = uc.kp_id AND uc.user_id = ?
+                    WHERE kp2.parent_id = ? AND kp2.id != ?
+                    ORDER BY (uc.mastery_score IS NULL), uc.mastery_score DESC
+                    LIMIT 3
+                ''', (user_id, kp['parent_id'], kp['id']))
+                siblings = [dict(r) for r in cursor.fetchall()]
+                if siblings:
+                    rec['siblings'] = siblings
+
+            recommendations.append(rec)
+
+        # 3. 推荐学习顺序（按 pending_wrong 降序，未学习的优先）
+        recommendations.sort(key=lambda r: (
+            r['knowledge_point']['pending_wrong'] or 0,
+            r['knowledge_point']['mastery_score'] is not None,
+            r['knowledge_point']['mastery_score'] or 0
+        ), reverse=False)
+
+    return jsonify({
+        'recommendations': recommendations,
+        'total_weak_kps': len(weak_kps),
+        'returned': len(recommendations)
+    })
+
+
 if __name__ == '__main__':
     ensure_schema()
     app.run(port=5002, debug=True)
