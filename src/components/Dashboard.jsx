@@ -1,5 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import { Link } from 'react-router-dom';
+import {
+  getStatsOverview,
+  getStatsCognition,
+  getStatsDaily,
+  getStatsCategory,
+  getRepracticeConversion
+} from '../utils/api';
+import LoadingSpinner from './LoadingSpinner';
 
 function Dashboard() {
   const [stats, setStats] = useState({
@@ -15,32 +23,22 @@ function Dashboard() {
   const [categoryStats, setCategoryStats] = useState([]);
   const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchData();
   }, []);
 
-  const getUserId = () => {
-    const stored = localStorage.getItem('ruankao_user_id');
-    return stored || 'default_user';
-  };
-
   const fetchData = async () => {
     try {
-      const userId = getUserId();
-      const [statsRes, cognitionRes, dailyRes, categoryRes, conversionRes] = await Promise.all([
-        fetch(`http://localhost:5002/api/stats/overview?user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/cognition?user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/daily?days=7&user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/category?user_id=${encodeURIComponent(userId)}`),
-        fetch('http://localhost:5002/api/metrics/repractice-conversion?days=7&hours=72')
+      setError(null);
+      const [statsData, cognitionData, dailyData, categoryData, conversionData] = await Promise.all([
+        getStatsOverview(),
+        getStatsCognition(),
+        getStatsDaily(7),
+        getStatsCategory(),
+        getRepracticeConversion(7, 72)
       ]);
-
-      const statsData = await statsRes.json();
-      const cognitionData = await cognitionRes.json();
-      const dailyData = await dailyRes.json();
-      const categoryData = await categoryRes.json();
-      const conversionData = await conversionRes.json();
 
       setStats(statsData);
       setCognitionMap(cognitionData.cognition_map || []);
@@ -49,13 +47,34 @@ function Dashboard() {
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
     } catch (error) {
       console.error('获取数据失败:', error);
+      setError(error.message || '获取数据失败');
     } finally {
       setLoading(false);
     }
   };
 
   if (loading) {
-    return <div className="page-container"><div className="empty-state">加载中...</div></div>;
+    return (
+      <div className="page-container">
+        <div className="empty-state">
+          <LoadingSpinner />
+        </div>
+      </div>
+    );
+  }
+
+  if (error) {
+    return (
+      <div className="page-container">
+        <div className="empty-state">
+          <div className="empty-state-icon">⚠️</div>
+          <p style={{ color: '#f44336' }}>加载失败: {error}</p>
+          <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={fetchData}>
+            重新加载
+          </button>
+        </div>
+      </div>
+    );
   }
 
   return (

@@ -1,100 +1,120 @@
-// 采集当前题目信息
+const QUESTION_TITLE_SELECTORS = [
+    '#answerInfotitle',
+    '.answerInfotitle',
+    '[id*="answerInfotitle"]',
+    '.question-title',
+    '.questionTitle',
+    '.exam-question-title',
+    '[class*="question-title"]',
+    '[class*="QuestionTitle"]'
+];
+
+const OPTIONS_SELECTORS = [
+    '.questionaw',
+    '.question-options',
+    '.options-container',
+    '.exam-options',
+    '[class*="question-options"]',
+    '[class*="QuestionOptions"]'
+];
+
+const ANSWER_SELECTORS = [
+    '.answer-to-the-question',
+    '.question-answer',
+    '.answer-section',
+    '[class*="answer-to"]',
+    '[class*="question-answer"]'
+];
+
+const ANALYSIS_SELECTORS = [
+    '.right-key.paddlr.lgccquestfont1',
+    '.question-analysis',
+    '.analysis-section',
+    '.answer-analysis',
+    '[class*="question-analysis"]',
+    '[class*="answer-analysis"]'
+];
+
+const QUESTION_CONTAINER_SELECTORS = [
+    '[class*="question"]',
+    '[class*="Question"]',
+    '[class*="item"]',
+    '[class*="card"]',
+    '[class*="exercise"]',
+    '.question-item',
+    '.exercise-item',
+    '.wrong-question-item',
+    '.question-card',
+    '.exam-question',
+    '[class*="question-item"]',
+    '[class*="QuestionItem"]',
+    '[class*="wrong-question"]'
+];
+
+let currentQuestionHash = '';
+let observer = null;
+
 function collectCurrentQuestion() {
     try {
         console.log('开始采集题目信息');
 
-        const questionElement = document.getElementById('answerInfotitle');
+        const questionElement = findQuestionTitleElement();
         if (!questionElement) {
-            console.error('未找到题目元素 #answerInfotitle');
+            console.error('未找到题目元素');
             throw new Error('未找到题目元素');
         }
 
-        // 题目内容在第一个div的文本中（排除第二个div的分类信息）
         let questionText = '';
 
-        // 获取所有子元素
-        const children = questionElement.children;
-        for (let i = 0; i < children.length; i++) {
-            const child = children[i];
-            // 找到第一个包含题目内容的div，跳过分类div
-            if (!child.className.includes('secondChapterName')) {
-                const text = child.textContent.trim();
-                if (text && text.length > 10) {
-                    questionText = text;
-                    break;
-                }
-            }
+        try {
+            questionText = extractQuestionText(questionElement);
+        } catch (e) {
+            console.error('提取题目文本失败:', e);
         }
-
-        // 如果没找到，尝试直接获取div的文本内容
-        if (!questionText) {
-            const text = questionElement.firstElementChild.textContent.trim();
-            if (text && text.length > 10) {
-                questionText = text;
-            }
-        }
-
-        // 清理题目文本中的空白字符
-        if (questionText) {
-            questionText = questionText.replace(/\s+/g, ' ').trim();
-        }
-
-        console.log('提取的题目:', questionText);
 
         if (!questionText) {
             throw new Error('未找到题目内容');
         }
 
-        // 获取分类信息
-        const categoryElement = questionElement.querySelector('.secondChapterName');
-        const category = categoryElement ? categoryElement.textContent.trim() : '';
+        console.log('提取的题目:', questionText);
+
+        let category = '';
+        try {
+            category = extractCategory(questionElement);
+        } catch (e) {
+            console.warn('提取分类失败:', e);
+        }
         console.log('分类:', category);
 
-        // 获取选项
-        const optionsElement = document.querySelector('.questionaw');
-        if (!optionsElement) {
-            throw new Error('未找到选项元素');
+        let options = [];
+        try {
+            options = extractOptions(questionElement);
+        } catch (e) {
+            console.warn('提取选项失败:', e);
         }
-
-        const options = [];
-        const optionElements = optionsElement.querySelectorAll('.options, .aWFalse, .aWtrue');
-
-        optionElements.forEach((optionElement) => {
-            const optionLabelElement = optionElement.querySelector('.awoption');
-            const contentElement = optionElement.querySelector('.content .ql-editor');
-            if (optionLabelElement && contentElement) {
-                const optionLabel = optionLabelElement.textContent.trim();
-                const optionContent = contentElement.textContent.trim();
-                options.push(`${optionLabel} ${optionContent}`);
-            }
-        });
         console.log('找到选项数量:', options.length);
 
-        // 获取答案信息
         let correctAnswer = '';
         let userAnswer = '';
-
-        const answerElement = document.querySelector('.answer-to-the-question');
-        if (answerElement) {
-            const rightKeyElements = answerElement.querySelectorAll('.right-key');
-            rightKeyElements.forEach(el => {
-                const text = el.textContent.trim();
-                if (text.startsWith('正确答案：')) {
-                    correctAnswer = text.replace('正确答案：', '').trim();
-                } else if (text.startsWith('你的答案：')) {
-                    userAnswer = text.replace('你的答案：', '').trim();
-                }
-            });
+        try {
+            const answers = extractAnswers(questionElement);
+            correctAnswer = answers.correctAnswer;
+            userAnswer = answers.userAnswer;
+        } catch (e) {
+            console.warn('提取答案失败:', e);
         }
         console.log('正确答案:', correctAnswer, '用户答案:', userAnswer);
 
-        // 获取解析
-        const analysisElement = document.querySelector('.right-key.paddlr.lgccquestfont1');
-        const analysis = analysisElement ? analysisElement.textContent.trim() : '';
+        let analysis = '';
+        try {
+            analysis = extractAnalysis(questionElement);
+        } catch (e) {
+            console.warn('提取解析失败:', e);
+        }
         console.log('解析:', analysis);
 
         const questionData = {
-            question_id: Date.now().toString(),
+            question_id: generateQuestionId(questionText),
             question: questionText,
             options: options,
             correct_answer: correctAnswer,
@@ -112,16 +132,36 @@ function collectCurrentQuestion() {
     }
 }
 
-// 采集单个题目元素的数据
-function collectQuestionElement(questionEl) {
-    try {
-        const questionTitleEl = questionEl.querySelector('#answerInfotitle, .answerInfotitle, [id*="answerInfotitle"]');
-        if (!questionTitleEl) {
-            return null;
-        }
+function generateQuestionId(questionText) {
+    let hash = 0;
+    const text = questionText.replace(/\s+/g, '').substring(0, 100);
+    for (let i = 0; i < text.length; i++) {
+        const char = text.charCodeAt(i);
+        hash = ((hash << 5) - hash) + char;
+        hash = hash & hash;
+    }
+    return 'q_' + Math.abs(hash) + '_' + Date.now().toString(36);
+}
 
-        let questionText = '';
-        const children = questionTitleEl.children;
+function findQuestionTitleElement() {
+    for (const selector of QUESTION_TITLE_SELECTORS) {
+        try {
+            const el = document.querySelector(selector);
+            if (el && el.textContent && el.textContent.trim().length > 10) {
+                return el;
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    return null;
+}
+
+function extractQuestionText(questionElement) {
+    let questionText = '';
+
+    try {
+        const children = questionElement.children;
         for (let i = 0; i < children.length; i++) {
             const child = children[i];
             if (!child.className || !child.className.includes('secondChapterName')) {
@@ -132,60 +172,257 @@ function collectQuestionElement(questionEl) {
                 }
             }
         }
+    } catch (e) {
+        console.warn('通过子元素提取题目失败:', e);
+    }
 
-        if (!questionText && questionTitleEl.firstElementChild) {
-            const text = questionTitleEl.firstElementChild.textContent.trim();
+    if (!questionText) {
+        try {
+            if (questionElement.firstElementChild) {
+                const text = questionElement.firstElementChild.textContent.trim();
+                if (text && text.length > 10) {
+                    questionText = text;
+                }
+            }
+        } catch (e) {
+            console.warn('通过firstElementChild提取题目失败:', e);
+        }
+    }
+
+    if (!questionText) {
+        try {
+            const text = questionElement.textContent.trim();
             if (text && text.length > 10) {
                 questionText = text;
             }
+        } catch (e) {
+            console.warn('直接提取textContent失败:', e);
+        }
+    }
+
+    if (questionText) {
+        questionText = questionText.replace(/\s+/g, ' ').trim();
+    }
+
+    return questionText;
+}
+
+function extractCategory(questionElement) {
+    try {
+        const categoryElement = questionElement.querySelector('.secondChapterName');
+        return categoryElement ? categoryElement.textContent.trim() : '';
+    } catch (e) {
+        return '';
+    }
+}
+
+function extractOptions(questionElement) {
+    const options = [];
+
+    const container = findParentBySelectors(questionElement, OPTIONS_SELECTORS) || findOptionsElementNearby(questionElement);
+    if (!container) {
+        return options;
+    }
+
+    try {
+        const optionElements = container.querySelectorAll('.options, .aWFalse, .aWtrue, .option-item, [class*="option-item"]');
+        optionElements.forEach((optionElement) => {
+            try {
+                const optionLabelElement = optionElement.querySelector('.awoption, .option-label, [class*="option-label"]');
+                const contentElement = optionElement.querySelector('.content .ql-editor, .option-content, [class*="option-content"]');
+                if (optionLabelElement && contentElement) {
+                    const optionLabel = optionLabelElement.textContent.trim();
+                    const optionContent = contentElement.textContent.trim();
+                    options.push(`${optionLabel} ${optionContent}`);
+                }
+            } catch (e) {
+                console.warn('提取单个选项失败:', e);
+            }
+        });
+    } catch (e) {
+        console.warn('提取选项列表失败:', e);
+    }
+
+    return options;
+}
+
+function findOptionsElementNearby(questionElement) {
+    try {
+        let el = questionElement.nextElementSibling;
+        while (el) {
+            for (const selector of OPTIONS_SELECTORS) {
+                if (el.matches(selector)) {
+                    return el;
+                }
+            }
+            const found = el.querySelector(OPTIONS_SELECTORS.join(','));
+            if (found) return found;
+            el = el.nextElementSibling;
         }
 
-        if (questionText) {
-            questionText = questionText.replace(/\s+/g, ' ').trim();
+        el = questionElement.parentElement;
+        let depth = 0;
+        while (el && depth < 5) {
+            for (const selector of OPTIONS_SELECTORS) {
+                const found = el.querySelector(selector);
+                if (found) return found;
+            }
+            el = el.parentElement;
+            depth++;
+        }
+    } catch (e) {
+        console.warn('查找选项元素失败:', e);
+    }
+    return null;
+}
+
+function findParentBySelectors(element, selectors) {
+    try {
+        let el = element.parentElement;
+        let depth = 0;
+        while (el && depth < 10) {
+            for (const selector of selectors) {
+                if (el.matches(selector)) {
+                    return el;
+                }
+            }
+            el = el.parentElement;
+            depth++;
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+function extractAnswers(questionElement) {
+    let correctAnswer = '';
+    let userAnswer = '';
+
+    try {
+        const answerElement = findAnswerElement(questionElement);
+        if (answerElement) {
+            const rightKeyElements = answerElement.querySelectorAll('.right-key, [class*="right-key"]');
+            rightKeyElements.forEach(el => {
+                try {
+                    const text = el.textContent.trim();
+                    if (text.startsWith('正确答案：') || text.includes('正确答案')) {
+                        correctAnswer = text.replace(/正确答案[：:]/, '').trim();
+                    } else if (text.startsWith('你的答案：') || text.includes('你的答案')) {
+                        userAnswer = text.replace(/你的答案[：:]/, '').trim();
+                    }
+                } catch (e) {
+                }
+            });
+        }
+    } catch (e) {
+        console.warn('提取答案失败:', e);
+    }
+
+    return { correctAnswer, userAnswer };
+}
+
+function findAnswerElement(questionElement) {
+    try {
+        let el = questionElement.parentElement;
+        let depth = 0;
+        while (el && depth < 10) {
+            for (const selector of ANSWER_SELECTORS) {
+                const found = el.querySelector(selector);
+                if (found) return found;
+            }
+            el = el.parentElement;
+            depth++;
+        }
+    } catch (e) {
+        return null;
+    }
+    return null;
+}
+
+function extractAnalysis(questionElement) {
+    try {
+        let el = questionElement.parentElement;
+        let depth = 0;
+        while (el && depth < 10) {
+            for (const selector of ANALYSIS_SELECTORS) {
+                const found = el.querySelector(selector);
+                if (found && found.textContent.trim().length > 5) {
+                    return found.textContent.trim();
+                }
+            }
+            el = el.parentElement;
+            depth++;
+        }
+    } catch (e) {
+        console.warn('提取解析失败:', e);
+    }
+    return '';
+}
+
+function collectQuestionElement(questionEl) {
+    try {
+        const questionTitleEl = findQuestionTitleInElement(questionEl);
+        if (!questionTitleEl) {
+            return null;
+        }
+
+        let questionText = '';
+        try {
+            questionText = extractQuestionText(questionTitleEl);
+        } catch (e) {
+            console.warn('提取题目文本失败:', e);
         }
 
         if (!questionText) {
             return null;
         }
 
-        const categoryElement = questionTitleEl.querySelector('.secondChapterName');
-        const category = categoryElement ? categoryElement.textContent.trim() : '';
+        let category = '';
+        try {
+            category = extractCategory(questionTitleEl);
+        } catch (e) {
+        }
 
-        const optionsElement = questionEl.querySelector('.questionaw');
-        const options = [];
-        if (optionsElement) {
-            const optionElements = optionsElement.querySelectorAll('.options, .aWFalse, .aWtrue');
-            optionElements.forEach((optionElement) => {
-                const optionLabelElement = optionElement.querySelector('.awoption');
-                const contentElement = optionElement.querySelector('.content .ql-editor');
-                if (optionLabelElement && contentElement) {
-                    const optionLabel = optionLabelElement.textContent.trim();
-                    const optionContent = contentElement.textContent.trim();
-                    options.push(`${optionLabel} ${optionContent}`);
-                }
-            });
+        let options = [];
+        try {
+            const optionsContainer = questionEl.querySelector(OPTIONS_SELECTORS.join(','));
+            if (optionsContainer) {
+                const optionElements = optionsContainer.querySelectorAll('.options, .aWFalse, .aWtrue');
+                optionElements.forEach((optionElement) => {
+                    try {
+                        const optionLabelElement = optionElement.querySelector('.awoption');
+                        const contentElement = optionElement.querySelector('.content .ql-editor');
+                        if (optionLabelElement && contentElement) {
+                            const optionLabel = optionLabelElement.textContent.trim();
+                            const optionContent = contentElement.textContent.trim();
+                            options.push(`${optionLabel} ${optionContent}`);
+                        }
+                    } catch (e) {
+                    }
+                });
+            }
+        } catch (e) {
+            console.warn('提取选项失败:', e);
         }
 
         let correctAnswer = '';
         let userAnswer = '';
-        const answerElement = questionEl.querySelector('.answer-to-the-question');
-        if (answerElement) {
-            const rightKeyElements = answerElement.querySelectorAll('.right-key');
-            rightKeyElements.forEach(el => {
-                const text = el.textContent.trim();
-                if (text.startsWith('正确答案：')) {
-                    correctAnswer = text.replace('正确答案：', '').trim();
-                } else if (text.startsWith('你的答案：')) {
-                    userAnswer = text.replace('你的答案：', '').trim();
-                }
-            });
+        try {
+            const answers = extractAnswers(questionTitleEl);
+            correctAnswer = answers.correctAnswer;
+            userAnswer = answers.userAnswer;
+        } catch (e) {
         }
 
-        const analysisElement = questionEl.querySelector('.right-key.paddlr.lgccquestfont1');
-        const analysis = analysisElement ? analysisElement.textContent.trim() : '';
+        let analysis = '';
+        try {
+            analysis = extractAnalysis(questionTitleEl);
+        } catch (e) {
+        }
 
         return {
-            question_id: Date.now().toString() + '_' + Math.random().toString(36).substr(2, 9),
+            question_id: generateQuestionId(questionText),
             question: questionText,
             options: options,
             correct_answer: correctAnswer,
@@ -199,51 +436,69 @@ function collectQuestionElement(questionEl) {
     }
 }
 
-// 采集所有可见错题
+function findQuestionTitleInElement(container) {
+    for (const selector of QUESTION_TITLE_SELECTORS) {
+        try {
+            const el = container.querySelector(selector);
+            if (el && el.textContent && el.textContent.trim().length > 10) {
+                return el;
+            }
+        } catch (e) {
+            continue;
+        }
+    }
+    return null;
+}
+
 async function collectAllWrongQuestions() {
     try {
         console.log('开始采集所有可见错题');
 
         let questionElements = [];
 
-        const titleElements = document.querySelectorAll('#answerInfotitle, [id*="answerInfotitle"], .answerInfotitle');
-        if (titleElements.length > 0) {
-            for (const titleEl of titleElements) {
-                let container = titleEl.closest('[class*="question"], [class*="Question"], [class*="item"], [class*="card"], [class*="exercise"]');
-                if (!container) {
-                    container = titleEl.parentElement;
-                    while (container && container.parentElement && container.children.length < 3) {
-                        container = container.parentElement;
+        try {
+            const titleElements = document.querySelectorAll(QUESTION_TITLE_SELECTORS.join(','));
+            if (titleElements.length > 0) {
+                for (const titleEl of titleElements) {
+                    let container = null;
+                    try {
+                        container = titleEl.closest(QUESTION_CONTAINER_SELECTORS.join(','));
+                    } catch (e) {
+                    }
+                    if (!container) {
+                        container = titleEl.parentElement;
+                        try {
+                            while (container && container.parentElement && container.children.length < 3) {
+                                container = container.parentElement;
+                            }
+                        } catch (e) {
+                        }
+                    }
+                    if (container && !questionElements.includes(container)) {
+                        questionElements.push(container);
                     }
                 }
-                if (container && !questionElements.includes(container)) {
-                    questionElements.push(container);
-                }
             }
+        } catch (e) {
+            console.warn('通过标题元素查找题目容器失败:', e);
         }
 
         if (questionElements.length <= 1) {
-            const selectors = [
-                '.question-item',
-                '.exercise-item',
-                '.wrong-question-item',
-                '.question-card',
-                '.exam-question',
-                '[class*="question-item"]',
-                '[class*="QuestionItem"]',
-                '[class*="wrong-question"]'
-            ];
-            for (const selector of selectors) {
-                const els = document.querySelectorAll(selector);
-                if (els.length > 1) {
-                    questionElements = Array.from(els);
-                    break;
+            try {
+                for (const selector of QUESTION_CONTAINER_SELECTORS) {
+                    const els = document.querySelectorAll(selector);
+                    if (els.length > 1) {
+                        questionElements = Array.from(els);
+                        break;
+                    }
                 }
+            } catch (e) {
+                console.warn('通过容器选择器查找失败:', e);
             }
         }
 
         if (questionElements.length === 0) {
-            const singleQuestion = document.getElementById('answerInfotitle');
+            const singleQuestion = findQuestionTitleElement();
             if (singleQuestion) {
                 const result = collectCurrentQuestion();
                 return result;
@@ -274,12 +529,23 @@ async function collectAllWrongQuestions() {
                 failCount++;
             }
 
-            showNotification(`采集中... ${i + 1}/${questionElements.length}`, 'info');
+            try {
+                sendProgressUpdate(i + 1, questionElements.length, successCount, failCount);
+            } catch (e) {
+            }
+
+            try {
+                showNotification(`采集中... ${i + 1}/${questionElements.length}`, 'info');
+            } catch (e) {
+            }
         }
 
         const resultMsg = `采集完成：成功 ${successCount} 道，失败 ${failCount} 道`;
         console.log(resultMsg);
-        showNotification(resultMsg, successCount > 0 ? 'success' : 'error');
+        try {
+            showNotification(resultMsg, successCount > 0 ? 'success' : 'error');
+        } catch (e) {
+        }
 
         return {
             success: successCount > 0,
@@ -294,79 +560,123 @@ async function collectAllWrongQuestions() {
     }
 }
 
-// 异步版本的发送函数
+function sendProgressUpdate(current, total, success, fail) {
+    try {
+        chrome.runtime.sendMessage({
+            action: 'collectProgress',
+            progress: {
+                current: current,
+                total: total,
+                success: success,
+                fail: fail
+            }
+        });
+    } catch (e) {
+    }
+}
+
 function sendToBackendViaBackgroundAsync(data) {
     return new Promise((resolve, reject) => {
+        try {
+            chrome.runtime.sendMessage({
+                action: 'sendToBackend',
+                data: data
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                if (response && response.success) {
+                    resolve(response);
+                } else {
+                    reject(new Error(response ? response.error : '未知错误'));
+                }
+            });
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+function sendToBackendViaBackground(data) {
+    console.log('通过background script发送数据');
+
+    try {
         chrome.runtime.sendMessage({
             action: 'sendToBackend',
             data: data
         }, function(response) {
             if (chrome.runtime.lastError) {
-                reject(new Error(chrome.runtime.lastError.message));
+                console.error('发送失败:', chrome.runtime.lastError);
+                showNotification('发送失败：' + chrome.runtime.lastError.message, 'error');
                 return;
             }
-            if (response && response.success) {
-                resolve(response);
+            console.log('发送成功:', response);
+            if (response && response.skipped) {
+                showNotification('题目已采集，无需重复', 'info');
+            } else if (response && response.queued) {
+                showNotification('网络异常，已加入待发送队列', 'info');
             } else {
-                reject(new Error(response ? response.error : '未知错误'));
+                showNotification('采集成功！', 'success');
             }
         });
-    });
+    } catch (e) {
+        console.error('发送异常:', e);
+        showNotification('发送失败：' + e.message, 'error');
+    }
 }
 
-// 通过background script发送数据到后端
-function sendToBackendViaBackground(data) {
-    console.log('通过background script发送数据');
-
-    chrome.runtime.sendMessage({
-        action: 'sendToBackend',
-        data: data
-    }, function(response) {
-        if (chrome.runtime.lastError) {
-            console.error('发送失败:', chrome.runtime.lastError);
-            showNotification('发送失败：' + chrome.runtime.lastError.message, 'error');
-            return;
-        }
-        console.log('发送成功:', response);
-        showNotification('采集成功！', 'success');
-    });
-}
-
-// 显示通知
 function showNotification(message, type) {
-    const notification = document.createElement('div');
-    notification.style.cssText = `
-        position: fixed;
-        top: 20px;
-        right: 20px;
-        padding: 15px 25px;
-        background: ${type === 'success' ? '#4CAF50' : '#f44336'};
-        color: white;
-        border-radius: 8px;
-        box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-        z-index: 10000;
-        font-family: Arial, sans-serif;
-        font-size: 14px;
-        animation: slideIn 0.3s ease;
-    `;
-    notification.textContent = message;
-    document.body.appendChild(notification);
-
-    const style = document.createElement('style');
-    style.textContent = `
-        @keyframes slideIn {
-            from { transform: translateX(100%); opacity: 0; }
-            to { transform: translateX(0); opacity: 1; }
+    try {
+        const existing = document.getElementById('plugin-notification-' + type);
+        if (existing) {
+            existing.remove();
         }
-    `;
-    document.head.appendChild(style);
 
-    setTimeout(() => {
-        notification.remove();
-    }, 3000);
+        const notification = document.createElement('div');
+        notification.id = 'plugin-notification-' + type;
+        notification.style.cssText = `
+            position: fixed;
+            top: 20px;
+            right: 20px;
+            padding: 15px 25px;
+            background: ${type === 'success' ? '#4CAF50' : type === 'error' ? '#f44336' : '#2196F3'};
+            color: white;
+            border-radius: 8px;
+            box-shadow: 0 4px 12px rgba(0,0,0,0.15);
+            z-index: 10000;
+            font-family: Arial, sans-serif;
+            font-size: 14px;
+            animation: slideIn 0.3s ease;
+            max-width: 300px;
+            word-wrap: break-word;
+        `;
+        notification.textContent = message;
+        document.body.appendChild(notification);
+
+        if (!document.getElementById('plugin-notification-style')) {
+            const style = document.createElement('style');
+            style.id = 'plugin-notification-style';
+            style.textContent = `
+                @keyframes slideIn {
+                    from { transform: translateX(100%); opacity: 0; }
+                    to { transform: translateX(0); opacity: 1; }
+                }
+            `;
+            document.head.appendChild(style);
+        }
+
+        setTimeout(() => {
+            try {
+                notification.remove();
+            } catch (e) {
+            }
+        }, 3000);
+    } catch (e) {
+        console.error('显示通知失败:', e);
+    }
 }
 
-// 监听来自popup和background的消息
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log('content.js收到消息:', request);
 
@@ -385,7 +695,6 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
 });
 
-// 键盘快捷键监听
 document.addEventListener('keydown', function(e) {
     if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
         console.log('快捷键 Ctrl+Shift+C 被触发');
@@ -399,6 +708,63 @@ document.addEventListener('keydown', function(e) {
     }
 });
 
-// 初始化
+function getCurrentQuestionHash() {
+    try {
+        const el = findQuestionTitleElement();
+        if (el) {
+            const text = el.textContent.trim().substring(0, 50);
+            return text;
+        }
+    } catch (e) {
+    }
+    return '';
+}
+
+function checkNewQuestion() {
+    try {
+        const newHash = getCurrentQuestionHash();
+        if (newHash && newHash !== currentQuestionHash) {
+            currentQuestionHash = newHash;
+            console.log('检测到新题目出现');
+            showNotification('检测到新题目，按 Ctrl+Shift+C 可采集', 'info');
+        }
+    } catch (e) {
+        console.warn('检查新题目失败:', e);
+    }
+}
+
+function initMutationObserver() {
+    try {
+        if (observer) {
+            observer.disconnect();
+        }
+
+        observer = new MutationObserver(function(mutations) {
+            let shouldCheck = false;
+            for (const mutation of mutations) {
+                if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
+                    shouldCheck = true;
+                    break;
+                }
+            }
+            if (shouldCheck) {
+                checkNewQuestion();
+            }
+        });
+
+        observer.observe(document.body, {
+            childList: true,
+            subtree: true
+        });
+
+        console.log('DOM观察器已启动');
+    } catch (e) {
+        console.error('初始化DOM观察器失败:', e);
+    }
+}
+
 console.log('软考达人错题采集插件已加载');
 console.log('提示：按 Ctrl+Shift+C 可快速采集当前题目');
+
+currentQuestionHash = getCurrentQuestionHash();
+initMutationObserver();

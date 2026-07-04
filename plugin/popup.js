@@ -2,6 +2,12 @@ const API_BASE = 'http://localhost:5002';
 
 document.addEventListener('DOMContentLoaded', function() {
     loadStats();
+    checkBackendStatus();
+    loadPendingQueueCount();
+
+    document.getElementById('retryQueueBtn').addEventListener('click', function() {
+        retryPendingQueue();
+    });
 });
 
 function loadStats() {
@@ -23,6 +29,112 @@ function loadStats() {
             });
     } catch (e) {
         console.log('统计加载异常:', e);
+    }
+}
+
+function checkBackendStatus() {
+    try {
+        chrome.runtime.sendMessage({ action: 'checkBackendStatus' }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.error('检查后端状态失败:', chrome.runtime.lastError);
+                setStatusIndicator('unknown');
+                return;
+            }
+            if (response && response.online) {
+                setStatusIndicator('online');
+            } else {
+                setStatusIndicator('offline');
+            }
+        });
+    } catch (e) {
+        console.error('检查后端状态异常:', e);
+        setStatusIndicator('unknown');
+    }
+}
+
+function setStatusIndicator(status) {
+    const dot = document.getElementById('statusDot');
+    const text = document.getElementById('statusText');
+
+    dot.className = 'status-dot';
+
+    if (status === 'online') {
+        dot.classList.add('online');
+        text.textContent = '后端在线';
+        text.style.color = '#4caf50';
+    } else if (status === 'offline') {
+        dot.classList.add('offline');
+        text.textContent = '后端离线';
+        text.style.color = '#f44336';
+    } else {
+        text.textContent = '未知';
+        text.style.color = '#999';
+    }
+}
+
+function loadPendingQueueCount() {
+    try {
+        chrome.runtime.sendMessage({ action: 'getPendingQueueCount' }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.error('获取待发送队列数量失败:', chrome.runtime.lastError);
+                return;
+            }
+            if (response) {
+                updateQueueDisplay(response.count || 0);
+            }
+        });
+    } catch (e) {
+        console.error('获取待发送队列数量异常:', e);
+    }
+}
+
+function updateQueueDisplay(count) {
+    const queueInfo = document.getElementById('queueInfo');
+    const queueCountText = document.getElementById('queueCountText');
+
+    if (count > 0) {
+        queueInfo.classList.add('visible');
+        queueCountText.textContent = `待发送：${count} 条`;
+    } else {
+        queueInfo.classList.remove('visible');
+    }
+}
+
+function retryPendingQueue() {
+    const btn = document.getElementById('retryQueueBtn');
+    const originalText = btn.textContent;
+
+    btn.disabled = true;
+    btn.textContent = '重试中...';
+
+    try {
+        chrome.runtime.sendMessage({ action: 'retryPendingQueue' }, function(response) {
+            btn.disabled = false;
+            btn.textContent = originalText;
+
+            if (chrome.runtime.lastError) {
+                console.error('重试待发送队列失败:', chrome.runtime.lastError);
+                showStatus('重试失败：' + chrome.runtime.lastError.message, 'error');
+                return;
+            }
+
+            if (response && response.success) {
+                updateQueueDisplay(response.remaining || 0);
+                if (response.remaining === 0) {
+                    showStatus('✓ 所有待发送数据已发送成功', 'success');
+                } else {
+                    showStatus(`部分发送成功，剩余 ${response.remaining} 条`, 'info');
+                }
+                loadStats();
+            } else {
+                showStatus('重试失败：' + (response ? response.error : '未知错误'), 'error');
+            }
+        });
+    } catch (e) {
+        btn.disabled = false;
+        btn.textContent = originalText;
+        console.error('重试待发送队列异常:', e);
+        showStatus('重试失败：' + e.message, 'error');
     }
 }
 
@@ -59,10 +171,19 @@ document.getElementById('collect').addEventListener('click', function() {
                                 return;
                             }
                             if (backendResponse && backendResponse.success) {
-                                showStatus('✓ 采集并发送成功！', 'success');
+                                if (backendResponse.skipped) {
+                                    showStatus('题目已采集，无需重复', 'info');
+                                } else if (backendResponse.queued) {
+                                    showStatus('网络异常，已加入待发送队列', 'info');
+                                    loadPendingQueueCount();
+                                } else {
+                                    showStatus('✓ 采集并发送成功！', 'success');
+                                }
                                 loadStats();
+                                loadPendingQueueCount();
                             } else {
                                 showStatus('发送失败：' + (backendResponse ? backendResponse.error : '未知错误'), 'error');
+                                loadPendingQueueCount();
                             }
                         });
                     } else {
@@ -103,6 +224,7 @@ document.getElementById('collectAll').addEventListener('click', function() {
                         const failCount = response.failCount || 0;
                         showStatus(`✓ 完成：成功 ${successCount} 道，失败 ${failCount} 道`, 'success');
                         loadStats();
+                        loadPendingQueueCount();
                     } else {
                         showStatus('采集失败：' + (response.error || '未知错误'), 'error');
                     }

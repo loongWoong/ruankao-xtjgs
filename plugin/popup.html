@@ -17,11 +17,37 @@
             color: #333;
             display: flex;
             align-items: center;
+            justify-content: space-between;
+        }
+        .header-left {
+            display: flex;
+            align-items: center;
             gap: 8px;
         }
-        h1::before {
+        .header-left::before {
             content: '📚';
             font-size: 18px;
+        }
+        .status-indicator {
+            display: flex;
+            align-items: center;
+            gap: 6px;
+            font-size: 11px;
+            font-weight: normal;
+        }
+        .status-dot {
+            width: 8px;
+            height: 8px;
+            border-radius: 50%;
+            background: #999;
+        }
+        .status-dot.online {
+            background: #4caf50;
+            box-shadow: 0 0 4px rgba(76, 175, 80, 0.5);
+        }
+        .status-dot.offline {
+            background: #f44336;
+            box-shadow: 0 0 4px rgba(244, 67, 54, 0.5);
         }
         .stats-card {
             background: white;
@@ -116,10 +142,50 @@
         .footer-link a:hover {
             text-decoration: underline;
         }
+        .queue-info {
+            background: #fff3cd;
+            color: #856404;
+            padding: 8px 10px;
+            border-radius: 6px;
+            font-size: 12px;
+            margin: 8px 0;
+            display: none;
+            align-items: center;
+            justify-content: space-between;
+            gap: 8px;
+        }
+        .queue-info.visible {
+            display: flex;
+        }
+        .queue-retry-btn {
+            background: #ffc107;
+            color: #333;
+            border: none;
+            padding: 4px 10px;
+            border-radius: 4px;
+            font-size: 12px;
+            cursor: pointer;
+            white-space: nowrap;
+            transition: background 0.2s;
+        }
+        .queue-retry-btn:hover {
+            background: #e0a800;
+        }
     </style>
 </head>
 <body>
-    <h1>软考错题采集</h1>
+    <h1>
+        <span class="header-left">软考错题采集</span>
+        <span class="status-indicator" id="statusIndicator">
+            <span class="status-dot" id="statusDot"></span>
+            <span id="statusText">检测中</span>
+        </span>
+    </h1>
+
+    <div class="queue-info" id="queueInfo">
+        <span id="queueCountText">待发送：0 条</span>
+        <button class="queue-retry-btn" id="retryQueueBtn">重试发送</button>
+    </div>
 
     <div class="stats-card">
         <div class="stat-item">

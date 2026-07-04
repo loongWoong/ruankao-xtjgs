@@ -1,6 +1,13 @@
 import React, { useState, useEffect } from 'react';
-
-const API_BASE = 'http://localhost:5002';
+import {
+  getWrongQuestions,
+  deleteWrongQuestion,
+  updateWrongQuestion,
+  batchDelete,
+  batchMaster,
+  getExportUrl
+} from '../utils/api';
+import LoadingSpinner from './LoadingSpinner';
 
 function QuestionBank() {
   const [questions, setQuestions] = useState([]);
@@ -15,28 +22,27 @@ function QuestionBank() {
     is_mastered: '',
     search: ''
   });
+  const [toast, setToast] = useState(null);
 
   useEffect(() => {
     fetchQuestions();
   }, [page, filter]);
 
-  const getUserId = () => {
-    const stored = localStorage.getItem('ruankao_user_id');
-    return stored || 'default_user';
+  const showToast = (message, type = 'success') => {
+    setToast({ message, type });
+    setTimeout(() => setToast(null), 3000);
   };
 
   const fetchQuestions = async () => {
     setLoading(true);
     try {
-      const params = new URLSearchParams({
+      const params = {
         page: page,
         limit: 50,
-        user_id: getUserId(),
         ...filter
-      });
+      };
 
-      const res = await fetch(`${API_BASE}/api/wrong-questions?${params}`);
-      const data = await res.json();
+      const data = await getWrongQuestions(params);
 
       setQuestions(data.items || []);
       setTotal(data.total || 0);
@@ -44,6 +50,7 @@ function QuestionBank() {
       setSelectedIds(new Set());
     } catch (error) {
       console.error('获取错题失败:', error);
+      showToast('获取错题失败: ' + error.message, 'error');
     } finally {
       setLoading(false);
     }
@@ -72,39 +79,34 @@ function QuestionBank() {
     if (!confirm(`确定要删除选中的 ${selectedIds.size} 道错题吗？`)) return;
 
     try {
-      await fetch(`${API_BASE}/api/wrong-questions/batch/delete`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(selectedIds) })
-      });
+      await batchDelete(Array.from(selectedIds));
       setSelectedIds(new Set());
       if (selectedQuestion && selectedIds.has(selectedQuestion.id)) {
         setSelectedQuestion(null);
       }
       fetchQuestions();
+      showToast('批量删除成功');
     } catch (error) {
       console.error('批量删除失败:', error);
+      showToast('批量删除失败: ' + error.message, 'error');
     }
   };
 
   const handleBatchMaster = async (mastered = true) => {
     if (selectedIds.size === 0) return;
     try {
-      await fetch(`${API_BASE}/api/wrong-questions/batch/master`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ ids: Array.from(selectedIds), is_mastered: mastered ? 1 : 0 })
-      });
+      await batchMaster(Array.from(selectedIds), mastered);
       setSelectedIds(new Set());
       fetchQuestions();
+      showToast(mastered ? '批量标记已掌握成功' : '批量取消掌握成功');
     } catch (error) {
       console.error('批量标记失败:', error);
+      showToast('批量标记失败: ' + error.message, 'error');
     }
   };
 
   const handleExport = (format) => {
-    const userId = getUserId();
-    const url = `${API_BASE}/api/wrong-questions/export/${format}?user_id=${encodeURIComponent(userId)}`;
+    const url = getExportUrl(format);
     window.open(url, '_blank');
   };
 
@@ -113,37 +115,51 @@ function QuestionBank() {
     if (!confirm('确定要删除这道错题吗？')) return;
 
     try {
-      await fetch(`${API_BASE}/api/wrong-questions/${id}`, {
-        method: 'DELETE'
-      });
+      await deleteWrongQuestion(id);
       if (selectedQuestion?.id === id) {
         setSelectedQuestion(null);
       }
       fetchQuestions();
+      showToast('删除成功');
     } catch (error) {
       console.error('删除失败:', error);
+      showToast('删除失败: ' + error.message, 'error');
     }
   };
 
   const handleMarkMastered = async (e, q) => {
     e.stopPropagation();
     try {
-      await fetch(`${API_BASE}/api/wrong-questions/${q.id}`, {
-        method: 'PUT',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ is_mastered: !q.is_mastered })
-      });
+      await updateWrongQuestion(q.id, { is_mastered: !q.is_mastered });
       fetchQuestions();
       if (selectedQuestion?.id === q.id) {
         setSelectedQuestion({ ...selectedQuestion, is_mastered: !q.is_mastered });
       }
+      showToast(!q.is_mastered ? '标记掌握成功' : '取消掌握成功');
     } catch (error) {
       console.error('标记失败:', error);
+      showToast('标记失败: ' + error.message, 'error');
     }
   };
 
   return (
     <div className="page-container">
+      {toast && (
+        <div style={{
+          position: 'fixed',
+          top: '20px',
+          left: '50%',
+          transform: 'translateX(-50%)',
+          padding: '12px 24px',
+          borderRadius: '8px',
+          color: '#fff',
+          backgroundColor: toast.type === 'error' ? '#f44336' : '#4caf50',
+          zIndex: 1000,
+          boxShadow: '0 2px 8px rgba(0,0,0,0.2)'
+        }}>
+          {toast.message}
+        </div>
+      )}
       <h1 className="page-title">错题库</h1>
 
       <div className="filters">
@@ -199,7 +215,7 @@ function QuestionBank() {
       <div className="split-view">
         <div className="split-view-list">
           {loading ? (
-            <div className="empty-state">加载中...</div>
+            <div className="empty-state"><LoadingSpinner /></div>
           ) : questions.length > 0 ? (
             <>
               <div className="question-list-header">

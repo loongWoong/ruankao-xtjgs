@@ -1,6 +1,7 @@
 import React, { useState, useEffect } from 'react';
 import { Link, useLocation } from 'react-router-dom';
 import './App.css';
+import ErrorBoundary from './components/ErrorBoundary';
 
 function App({ children }) {
   const [sidebarOpen, setSidebarOpen] = useState(false);
@@ -44,7 +45,9 @@ function App({ children }) {
         </aside>
 
         <main className="app-main">
-          {children}
+          <ErrorBoundary>
+            {children}
+          </ErrorBoundary>
         </main>
       </div>
     </div>

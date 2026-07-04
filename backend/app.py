@@ -6,12 +6,30 @@ import os
 import hashlib
 import csv
 import io
-from datetime import datetime
+import re
+import html
+from datetime import datetime, timedelta
 from contextlib import contextmanager
 from functools import wraps
+from collections import defaultdict
 
 app = Flask(__name__)
-CORS(app)
+
+ALLOWED_ORIGINS = [
+    'http://localhost:5173',
+    'http://localhost:3000',
+    'http://127.0.0.1:5173',
+    'http://127.0.0.1:3000',
+    'chrome-extension://'
+]
+
+CORS(app, resources={
+    r"/api/*": {
+        "origins": ALLOWED_ORIGINS,
+        "methods": ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+        "allow_headers": ["Content-Type", "Authorization"]
+    }
+})
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 DB_PATH = os.path.join(BASE_DIR, 'ruankao.db')
@@ -19,6 +37,46 @@ REFLECTION_ROLLOUT_PERCENT = 10
 
 MAX_PAGE_LIMIT = 100
 DEFAULT_PAGE_LIMIT = 20
+MAX_SEARCH_LENGTH = 200
+MAX_BATCH_SIZE = 500
+MAX_REQUEST_BODY_SIZE = 10 * 1024 * 1024
+
+RATE_LIMIT_WINDOW = 60
+RATE_LIMIT_MAX_REQUESTS = 120
+
+_rate_limit_store = defaultdict(list)
+
+def rate_limit(func):
+    @wraps(func)
+    def wrapper(*args, **kwargs):
+        client_ip = request.remote_addr or 'unknown'
+        now = datetime.now()
+        window_start = now - timedelta(seconds=RATE_LIMIT_WINDOW)
+        
+        _rate_limit_store[client_ip] = [
+            t for t in _rate_limit_store[client_ip] if t > window_start
+        ]
+        
+        if len(_rate_limit_store[client_ip]) >= RATE_LIMIT_MAX_REQUESTS:
+            return jsonify({'error': 'Too many requests, please try again later'}), 429
+        
+        _rate_limit_store[client_ip].append(now)
+        return func(*args, **kwargs)
+    return wrapper
+
+def sanitize_string(value, max_length=5000):
+    if not isinstance(value, str):
+        return ''
+    value = value.strip()
+    if len(value) > max_length:
+        value = value[:max_length]
+    value = re.sub(r'[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]', '', value)
+    return value
+
+def sanitize_search_query(query):
+    query = sanitize_string(query, MAX_SEARCH_LENGTH)
+    query = query.replace('%', r'\%').replace('_', r'\_')
+    return query
 
 @contextmanager
 def get_db_conn():
@@ -171,6 +229,14 @@ def ensure_schema():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_question_mapping_q ON question_mapping(question_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_question_mapping_kp ON question_mapping(kp_id)')
 
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_id ON wrong_questions(user_id)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_mastered ON wrong_questions(user_id, is_mastered)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_category ON wrong_questions(user_id, category)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_chapter ON wrong_questions(user_id, chapter)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_created ON wrong_questions(user_id, created_at DESC)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_srs ON wrong_questions(user_id, is_mastered, next_review_time)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_wq_user_srs_stage ON wrong_questions(user_id, srs_stage)')
+
         default_patterns = [
             ('概念理解错误', '对基本概念、定义理解不准确'),
             ('计算错误', '计算过程中出现失误'),
@@ -293,7 +359,27 @@ def health_check():
 @app.route('/api/wrong-questions', methods=['POST'])
 @api_response
 def add_wrong_question():
-    data = request.get_json()
+    data = request.get_json() or {}
+    
+    clean_question = sanitize_string(data.get('question', ''), 5000)
+    clean_user_answer = sanitize_string(data.get('user_answer', ''), 200)
+    clean_correct_answer = sanitize_string(data.get('correct_answer', ''), 200)
+    clean_analysis = sanitize_string(data.get('analysis', ''), 5000)
+    clean_category = sanitize_string(data.get('category', ''), 200)
+    clean_chapter = sanitize_string(data.get('chapter', ''), 200)
+    clean_source_url = sanitize_string(data.get('source_url', ''), 1000)
+    clean_question_id = sanitize_string(data.get('question_id', ''), 100)
+    clean_user_id = sanitize_string(data.get('user_id', 'default_user'), 100) or 'default_user'
+    
+    raw_options = data.get('options', [])
+    if isinstance(raw_options, list):
+        clean_options = [sanitize_string(opt, 2000) for opt in raw_options[:20]]
+    else:
+        clean_options = []
+    
+    if not clean_question:
+        return jsonify({'error': 'Question content is required'}), 400
+    
     with get_db_conn() as conn:
         cursor = conn.cursor()
 
@@ -303,16 +389,16 @@ def add_wrong_question():
                 analysis, category, chapter, source_url, user_id
             ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
         ''', (
-            data.get('question_id', ''),
-            data.get('question', ''),
-            json.dumps(data.get('options', [])),
-            data.get('user_answer', ''),
-            data.get('correct_answer', ''),
-            data.get('analysis', ''),
-            data.get('category', ''),
-            data.get('chapter', ''),
-            data.get('source_url', ''),
-            data.get('user_id', 'default_user')
+            clean_question_id,
+            clean_question,
+            json.dumps(clean_options),
+            clean_user_answer,
+            clean_correct_answer,
+            clean_analysis,
+            clean_category,
+            clean_chapter,
+            clean_source_url,
+            clean_user_id
         ))
         q_id = cursor.lastrowid
 
@@ -325,17 +411,18 @@ def add_wrong_question():
 
         kps = data.get('knowledge_points', [])
         if not kps:
-            kp_name = data.get('chapter') or data.get('category') or 'General'
+            kp_name = clean_chapter or clean_category or 'General'
             kps = [kp_name]
 
-        user_id = data.get('user_id', 'default_user')
         for kp_name in kps:
-            kp_id = get_or_create_kp(cursor, kp_name, data.get('category'), data.get('chapter'))
-            cursor.execute('INSERT INTO question_mapping (question_id, kp_id) VALUES (?, ?)', (q_id, kp_id))
-            cursor.execute('''
-                INSERT OR IGNORE INTO user_cognition (kp_id, user_id, mastery_score, stability, last_visit)
-                VALUES (?, ?, 0.3, 0.5, CURRENT_TIMESTAMP)
-            ''', (kp_id, user_id))
+            clean_kp = sanitize_string(kp_name, 200)
+            if clean_kp:
+                kp_id = get_or_create_kp(cursor, clean_kp, clean_category, clean_chapter)
+                cursor.execute('INSERT INTO question_mapping (question_id, kp_id) VALUES (?, ?)', (q_id, kp_id))
+                cursor.execute('''
+                    INSERT OR IGNORE INTO user_cognition (kp_id, user_id, mastery_score, stability, last_visit)
+                    VALUES (?, ?, 0.3, 0.5, CURRENT_TIMESTAMP)
+                ''', (kp_id, clean_user_id))
 
         conn.commit()
     return jsonify({'success': True, 'id': q_id})
@@ -373,9 +460,11 @@ def get_wrong_questions():
             where_clauses.append('is_mastered = ?')
             params.append(int(is_mastered))
         if search:
-            where_clauses.append('(question LIKE ? OR analysis LIKE ? OR options LIKE ? OR category LIKE ? OR chapter LIKE ?)')
-            like_pattern = f'%{search}%'
-            params.extend([like_pattern, like_pattern, like_pattern, like_pattern, like_pattern])
+            safe_search = sanitize_search_query(search)
+            if safe_search:
+                where_clauses.append('(question LIKE ? ESCAPE \'\\\' OR analysis LIKE ? ESCAPE \'\\\' OR options LIKE ? ESCAPE \'\\\' OR category LIKE ? ESCAPE \'\\\' OR chapter LIKE ? ESCAPE \'\\\')')
+                like_pattern = f'%{safe_search}%'
+                params.extend([like_pattern, like_pattern, like_pattern, like_pattern, like_pattern])
 
         where_sql = ' AND '.join(where_clauses)
         cursor.execute(f'SELECT COUNT(*) FROM wrong_questions WHERE {where_sql}', params)
