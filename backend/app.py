@@ -1971,6 +1971,20 @@ def _format_question(row):
 
 SRS_INTERVALS = [1, 2, 4, 7, 15, 30, 60, 120]
 
+# 测试数据特征：用于过滤/清理早期开发留下的脏数据
+TEST_CATEGORY_PATTERNS = {'测试章节', '测试分类', '测试类别', 'General', 'test', 'Test'}
+TEST_QUESTION_KEYWORDS = ('测试题目', '测试XSS', '<script>', 'alert(1)', '新测试题目')
+
+
+def is_test_data(category='', chapter='', question=''):
+    """识别测试/开发残留的脏数据"""
+    cat_chap = {category or '', chapter or ''}
+    if cat_chap & TEST_CATEGORY_PATTERNS:
+        return True
+    q = question or ''
+    return any(kw in q for kw in TEST_QUESTION_KEYWORDS)
+
+
 def update_srs(cursor, question_id, is_correct):
     cursor.execute('SELECT srs_stage FROM wrong_questions WHERE id = ?', (question_id,))
     row = cursor.fetchone()
@@ -2512,6 +2526,9 @@ def get_stats_weak_points():
         rows = cursor.fetchall()
         weak_points = []
         for row in rows:
+            # 过滤测试数据（测试章节/测试分类等）
+            if row['category'] in TEST_CATEGORY_PATTERNS:
+                continue
             total = row['total']
             not_mastered = row['not_mastered']
             weak_rate = round((not_mastered / total) * 100, 2) if total > 0 else 0
@@ -2541,11 +2558,15 @@ def get_cognition_stats():
         
         stats = []
         for row in cursor.fetchall():
+            category = row['category'] or ''
+            # 过滤空 category 和测试数据
+            if not category or category in TEST_CATEGORY_PATTERNS:
+                continue
             stats.append({
                 'name': row['name'],
                 'score': row['mastery_score'],
                 'stability': row['stability'],
-                'category': row['category']
+                'category': category
             })
     return jsonify({'cognition_map': stats})
 
@@ -6996,6 +7017,60 @@ def auto_classify_wrong_questions():
         'updated': updated,
         'mappings_created': mappings_created,
         'details': details
+    })
+
+
+@app.route('/api/admin/cleanup-test-data', methods=['POST'])
+@api_response
+def cleanup_test_data():
+    """清理测试/开发残留的脏数据。
+    识别规则：category/chapter 命中 TEST_CATEGORY_PATTERNS，或题目内容含 XSS/测试关键字。
+    可选 body: { user_id: 'xxx', dry_run: true|false }
+    dry_run=true 时只返回将删除的列表，不实际删除。
+    """
+    body = request.get_json(silent=True) or {}
+    target_user = body.get('user_id')
+    dry_run = bool(body.get('dry_run', False))
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        # 拉取候选删除项
+        if target_user:
+            cursor.execute(
+                'SELECT id, user_id, question, category, chapter FROM wrong_questions WHERE user_id = ?',
+                (target_user,)
+            )
+        else:
+            cursor.execute('SELECT id, user_id, question, category, chapter FROM wrong_questions')
+        candidates = []
+        for r in cursor.fetchall():
+            if is_test_data(r['category'] or '', r['chapter'] or '', r['question'] or ''):
+                candidates.append({
+                    'id': r['id'], 'user_id': r['user_id'],
+                    'category': r['category'], 'chapter': r['chapter'],
+                    'question_preview': (r['question'] or '')[:60]
+                })
+
+        if dry_run:
+            return jsonify({
+                'dry_run': True,
+                'matched': len(candidates),
+                'candidates': candidates
+            })
+
+        deleted = 0
+        for c in candidates:
+            # 同步清理 question_mapping / practice_attempts 由外键级联（如有），这里显式清理 mapping
+            cursor.execute('DELETE FROM question_mapping WHERE question_id = ?', (c['id'],))
+            cursor.execute('DELETE FROM wrong_questions WHERE id = ?', (c['id'],))
+            deleted += 1
+        conn.commit()
+
+    return jsonify({
+        'dry_run': False,
+        'matched': len(candidates),
+        'deleted': deleted,
+        'candidates': candidates
     })
 
 
