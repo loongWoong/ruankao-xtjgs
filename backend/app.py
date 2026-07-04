@@ -6023,6 +6023,189 @@ def submit_review():
     })
 
 
+@app.route('/api/study/today-goals', methods=['GET'])
+@api_response
+def get_today_study_goals():
+    """今日学习目标：复习N题+练习N题+打卡状态，返回进度"""
+    user_id = get_user_id()
+    today = datetime.now().strftime('%Y-%m-%d')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 今日待复习数（复习队列总量）
+        cursor.execute('''
+            SELECT COUNT(*) FROM wrong_questions
+            WHERE user_id = ? AND is_mastered = 0
+            AND (next_review_time IS NULL OR next_review_time <= ? OR srs_stage = 0)
+        ''', (user_id, today + ' 23:59:59'))
+        review_target = cursor.fetchone()[0]
+        review_target = min(review_target, 10)  # 目标上限 10 题
+
+        # 今日已练习数
+        cursor.execute('''
+            SELECT COUNT(*) FROM practice_attempts
+            WHERE user_id = ? AND DATE(attempted_at) = DATE('now')
+        ''', (user_id,))
+        practiced_today = cursor.fetchone()[0]
+
+        # 今日已复习数（通过 review/submit 或 practice 完成的复习）
+        cursor.execute('''
+            SELECT COUNT(DISTINCT question_id) FROM practice_attempts
+            WHERE user_id = ? AND DATE(attempted_at) = DATE('now')
+        ''', (user_id,))
+        reviewed_today = cursor.fetchone()[0]
+
+        # 今日打卡
+        cursor.execute('''
+            SELECT COUNT(*) FROM study_checkins
+            WHERE user_id = ? AND checkin_date = DATE('now')
+        ''', (user_id,))
+        checked_in = cursor.fetchone()[0] > 0
+
+        # 连续打卡天数
+        cursor.execute('''
+            SELECT checkin_date FROM study_checkins
+            WHERE user_id = ?
+            ORDER BY checkin_date DESC LIMIT 60
+        ''', (user_id,))
+        dates = [r['checkin_date'] for r in cursor.fetchall()]
+        streak = 0
+        if dates:
+            from datetime import date as date_cls, timedelta as td
+            today_date = date_cls.today()
+            # 如果今天打了卡，从今天开始算；否则从昨天开始算
+            check_date = today_date if checked_in else today_date - td(days=1)
+            for d in dates:
+                d_str = d if isinstance(d, str) else str(d)
+                try:
+                    d_obj = date_cls.fromisoformat(d_str[:10])
+                except Exception:
+                    continue
+                if d_obj == check_date:
+                    streak += 1
+                    check_date -= td(days=1)
+                elif d_obj < check_date:
+                    break
+
+        # 累计打卡天数
+        total_checkin_days = len(dates)
+
+    goals = [
+        {
+            'key': 'review',
+            'label': '复习错题',
+            'target': review_target,
+            'done': min(reviewed_today, review_target),
+            'unit': '题',
+            'icon': '🔁',
+            'link': '/review'
+        },
+        {
+            'key': 'practice',
+            'label': '练习答题',
+            'target': 10,
+            'done': min(practiced_today, 10),
+            'unit': '题',
+            'icon': '✍️',
+            'link': '/practice?mode=today'
+        },
+        {
+            'key': 'checkin',
+            'label': '每日打卡',
+            'target': 1,
+            'done': 1 if checked_in else 0,
+            'unit': '次',
+            'icon': '🔥',
+            'link': '/checkin'
+        }
+    ]
+
+    total_done = sum(g['done'] for g in goals)
+    total_target = sum(g['target'] for g in goals)
+    overall_rate = round((total_done / total_target) * 100, 1) if total_target > 0 else 0
+
+    return jsonify({
+        'goals': goals,
+        'overall_rate': overall_rate,
+        'streak_days': streak,
+        'total_checkin_days': total_checkin_days,
+        'checked_in_today': checked_in
+    })
+
+
+@app.route('/api/study/streak', methods=['GET'])
+@api_response
+def get_study_streak():
+    """连续打卡统计 + 近 30 天打卡日历"""
+    user_id = get_user_id()
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            SELECT checkin_date, study_minutes FROM study_checkins
+            WHERE user_id = ? AND checkin_date >= DATE('now', '-30 days')
+            ORDER BY checkin_date
+        ''', (user_id,))
+        recent = [dict(r) for r in cursor.fetchall()]
+
+        cursor.execute('''
+            SELECT checkin_date FROM study_checkins
+            WHERE user_id = ? ORDER BY checkin_date DESC LIMIT 90
+        ''', (user_id,))
+        dates = [r['checkin_date'] for r in cursor.fetchall()]
+
+        from datetime import date as date_cls, timedelta as td
+        today_date = date_cls.today()
+        cursor.execute('''
+            SELECT COUNT(*) FROM study_checkins
+            WHERE user_id = ? AND checkin_date = DATE('now')
+        ''', (user_id,))
+        checked_in_today = cursor.fetchone()[0] > 0
+
+        streak = 0
+        if dates:
+            check_date = today_date if checked_in_today else today_date - td(days=1)
+            for d in dates:
+                d_str = d if isinstance(d, str) else str(d)
+                try:
+                    d_obj = date_cls.fromisoformat(d_str[:10])
+                except Exception:
+                    continue
+                if d_obj == check_date:
+                    streak += 1
+                    check_date -= td(days=1)
+                elif d_obj < check_date:
+                    break
+
+        # 最长连续打卡
+        max_streak = 0
+        if dates:
+            sorted_dates = []
+            for d in dates:
+                d_str = d if isinstance(d, str) else str(d)
+                try:
+                    sorted_dates.append(date_cls.fromisoformat(d_str[:10]))
+                except Exception:
+                    continue
+            sorted_dates.sort(reverse=True)
+            cur_streak = 1
+            for i in range(1, len(sorted_dates)):
+                if (sorted_dates[i-1] - sorted_dates[i]).days == 1:
+                    cur_streak += 1
+                else:
+                    max_streak = max(max_streak, cur_streak)
+                    cur_streak = 1
+            max_streak = max(max_streak, cur_streak)
+
+    return jsonify({
+        'current_streak': streak,
+        'max_streak': max_streak,
+        'total_checkin_days': len(dates),
+        'checked_in_today': checked_in_today,
+        'recent_30_days': recent
+    })
+
+
 @app.route('/api/review/upcoming', methods=['GET'])
 @api_response
 def get_review_upcoming():

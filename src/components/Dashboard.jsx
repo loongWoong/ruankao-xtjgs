@@ -7,7 +7,8 @@ import {
   getStatsCategory,
   getRepracticeConversion,
   getReviewQueue,
-  getReportDownloadUrl
+  getReportDownloadUrl,
+  getTodayStudyGoals
 } from '../utils/api';
 import LoadingSpinner from './LoadingSpinner';
 
@@ -25,6 +26,7 @@ function Dashboard() {
   const [categoryStats, setCategoryStats] = useState([]);
   const [conversion, setConversion] = useState({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
   const [reviewSummary, setReviewSummary] = useState({ today_count: 0, overdue_count: 0, total_pending: 0 });
+  const [goals, setGoals] = useState({ goals: [], overall_rate: 0, streak_days: 0, total_checkin_days: 0, checked_in_today: false });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
 
@@ -35,13 +37,14 @@ function Dashboard() {
   const fetchData = async () => {
     try {
       setError(null);
-      const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData] = await Promise.all([
+      const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData, goalsData] = await Promise.all([
         getStatsOverview(),
         getStatsCognition(),
         getStatsDaily(7),
         getStatsCategory(),
         getRepracticeConversion(7, 72),
-        getReviewQueue(1).catch(() => ({ stats: {} }))
+        getReviewQueue(1).catch(() => ({ stats: {} })),
+        getTodayStudyGoals().catch(() => ({ goals: [], overall_rate: 0, streak_days: 0, checked_in_today: false }))
       ]);
 
       setStats(statsData);
@@ -50,6 +53,7 @@ function Dashboard() {
       setCategoryStats(categoryData.categories || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
       setReviewSummary(reviewData.stats || { today_count: 0, overdue_count: 0, total_pending: 0 });
+      setGoals(goalsData);
     } catch (error) {
       console.error('获取数据失败:', error);
       setError(error.message || '获取数据失败');
@@ -95,6 +99,77 @@ function Dashboard() {
   return (
     <div className="page-container">
       <h1 className="page-title">认知增强看板</h1>
+
+      {/* 今日学习目标 + 连续打卡激励（首页强引导） */}
+      <div className="dashboard-grid" style={{ gridTemplateColumns: '2fr 1fr', marginTop: '1rem' }}>
+        <div className="section-card" style={{ background: 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)', color: '#fff', border: 'none' }}>
+          <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '0.75rem' }}>
+            <h2 className="section-title" style={{ color: '#fff', margin: 0 }}>🎯 今日学习目标</h2>
+            <span style={{ fontSize: '1.5rem', fontWeight: 700, background: 'rgba(255,255,255,0.25)', padding: '0.2rem 0.8rem', borderRadius: '12px' }}>
+              {goals.overall_rate || 0}%
+            </span>
+          </div>
+          <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '0.75rem' }}>
+            {(goals.goals || []).map((g) => {
+              const rate = g.target > 0 ? Math.min(100, (g.done / g.target) * 100) : 0;
+              const done = g.done >= g.target;
+              return (
+                <Link
+                  key={g.key}
+                  to={g.link}
+                  style={{
+                    background: 'rgba(255,255,255,0.15)',
+                    borderRadius: '8px',
+                    padding: '0.75rem',
+                    textDecoration: 'none',
+                    color: '#fff',
+                    border: done ? '1px solid rgba(255,255,255,0.5)' : '1px solid transparent'
+                  }}
+                >
+                  <div style={{ fontSize: '1.2rem' }}>{g.icon} {done && '✓'}</div>
+                  <div style={{ fontSize: '0.85rem', opacity: 0.9, marginTop: '0.25rem' }}>{g.label}</div>
+                  <div style={{ fontSize: '1.3rem', fontWeight: 700, marginTop: '0.25rem' }}>
+                    {g.done}/{g.target} <span style={{ fontSize: '0.75rem', fontWeight: 400 }}>{g.unit}</span>
+                  </div>
+                  <div style={{ height: '4px', background: 'rgba(255,255,255,0.2)', borderRadius: '2px', marginTop: '0.4rem' }}>
+                    <div style={{ width: `${rate}%`, height: '100%', background: '#fff', borderRadius: '2px' }} />
+                  </div>
+                </Link>
+              );
+            })}
+          </div>
+          {goals.overall_rate < 100 && (
+            <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', opacity: 0.9 }}>
+              💪 完成今日目标，保持学习节奏！
+            </div>
+          )}
+          {goals.overall_rate >= 100 && (
+            <div style={{ marginTop: '0.75rem', fontSize: '0.85rem', opacity: 0.9 }}>
+              🎉 今日目标已全部完成，太棒了！
+            </div>
+          )}
+        </div>
+
+        <div className="section-card" style={{ textAlign: 'center', display: 'flex', flexDirection: 'column', justifyContent: 'center' }}>
+          <div style={{ fontSize: '0.85rem', color: '#888' }}>连续打卡</div>
+          <div style={{ fontSize: '3rem', fontWeight: 800, color: '#ff9800', lineHeight: 1.1, margin: '0.25rem 0' }}>
+            {goals.streak_days || 0}
+          </div>
+          <div style={{ fontSize: '0.85rem', color: '#666' }}>天 🔥</div>
+          <div style={{ marginTop: '0.5rem', fontSize: '0.75rem', color: '#999' }}>
+            累计 {goals.total_checkin_days || 0} 天
+          </div>
+          {goals.checked_in_today ? (
+            <div style={{ marginTop: '0.5rem', fontSize: '0.8rem', color: '#4caf50', fontWeight: 600 }}>
+              ✓ 今日已打卡
+            </div>
+          ) : (
+            <Link to="/checkin" className="btn btn-primary" style={{ marginTop: '0.75rem', padding: '0.4rem 1rem', fontSize: '0.85rem' }}>
+              去打卡
+            </Link>
+          )}
+        </div>
+      </div>
 
       <div className="stats-grid">
         <div className="stat-card">

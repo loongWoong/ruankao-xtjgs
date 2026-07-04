@@ -595,6 +595,16 @@ export const submitReview = (questionId, isCorrect, timeSpent = 0) => {
   });
 };
 
+// ==================== 今日学习目标 / 连续打卡 ====================
+
+export const getTodayStudyGoals = () => {
+  return fetchAPI('/api/study/today-goals');
+};
+
+export const getStudyStreak = () => {
+  return fetchAPI('/api/study/streak');
+};
+
 // ==================== 能力雷达图 ====================
 
 export const getAbilityRadar = () => {
