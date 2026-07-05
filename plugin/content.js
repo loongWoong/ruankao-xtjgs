@@ -735,19 +735,23 @@ async function collectAllWrongQuestions() {
         }
 
         const dedupedCount = batchResult ? (batchResult.skipped || 0) : 0;
+        // 全去重场景（所有题都在 5 分钟内已发过）：inserted=0, updated=0, skipped>0
+        // 此时不应判为失败，数据已在库中，应返回 success=true 让 popup 显示"已采集"而非"采集失败"
+        const allDeduped = dedupedCount > 0 && successCount === 0 && failCount === 0;
         const resultMsg = `采集完成：共 ${collectedQuestions.length} 道` +
             `，成功 ${successCount}` +
             (dedupedCount > 0 ? `，去重 ${dedupedCount}` : '') +
             (failCount > 0 ? `，失败 ${failCount}` : '') +
-            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued}` : '');
+            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued}` : '') +
+            (allDeduped ? '（均已采集，无需重复）' : '');
         console.log(resultMsg);
         try {
-            showNotification(resultMsg, successCount > 0 ? 'success' : 'error');
+            showNotification(resultMsg, (successCount > 0 || allDeduped) ? 'success' : 'error');
         } catch (e) {
         }
 
         return {
-            success: successCount > 0,
+            success: successCount > 0 || allDeduped,
             total: collectedQuestions.length,  // 实际采集到的题目数（而非容器数）
             containerCount: questionElements.length,  // 找到的题目容器数
             dedupedCount: dedupedCount,  // 去重掉的题目数
@@ -1110,18 +1114,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
 });
 
-document.addEventListener('keydown', function(e) {
-    if ((e.ctrlKey || e.metaKey) && e.shiftKey && e.key === 'C') {
-        console.log('快捷键 Ctrl+Shift+C 被触发');
-        e.preventDefault();
-        const result = collectCurrentQuestion();
-        if (result.success && result.data) {
-            sendToBackendViaBackground(result.data);
-        } else if (!result.success) {
-            showNotification('采集失败：' + result.error, 'error');
-        }
-    }
-});
+// 注意：快捷键 Ctrl+Shift+C 由 manifest commands 注册 + background.js commands.onCommand 处理。
+// 不在此处监听 keydown，否则会与 background 路径双重触发，导致同一题并发发送两次，
+// 后端 UPSERT UPDATE 累加 wrong_count（R25 修复 processPendingQueue 的同类问题）。
 
 function getCurrentQuestionHash() {
     try {

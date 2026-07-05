@@ -436,42 +436,56 @@ async function getSessionHistory() {
     }
 }
 
+// 队列处理互斥锁：alarm（每30秒）与 popup retry 按钮可并发触发 processPendingQueue，
+// 若不互斥，两个实例各自读取同一快照、各自 sendToBackend(skipDedup=true)，
+// 后端收到两条相同 question_id 的 POST，wrong_count 被累加。
+let isProcessingQueue = false;
+
 async function processPendingQueue() {
-    await ensureInitialized();
-    const queue = await getPendingQueue();
-    if (queue.length === 0) return;
+    if (isProcessingQueue) {
+        console.log('队列正在处理中，跳过本次触发');
+        return;
+    }
+    isProcessingQueue = true;
+    try {
+        await ensureInitialized();
+        const queue = await getPendingQueue();
+        if (queue.length === 0) return;
 
-    console.log(`开始处理待发送队列，共 ${queue.length} 条`);
+        console.log(`开始处理待发送队列，共 ${queue.length} 条`);
 
-    // 逐条原子处理：每条成功后立即按 queue_id 从 storage 移除
-    // 避免 SW 中途死亡时已发条目仍留在队列，下次重发触发 UPSERT UPDATE 累加 wrong_count
-    let successCount = 0;
-    let failedCount = 0;
+        // 逐条原子处理：每条成功后立即按 queue_id 从 storage 移除
+        // 避免 SW 中途死亡时已发条目仍留在队列，下次重发触发 UPSERT UPDATE 累加 wrong_count
+        let successCount = 0;
+        let failedCount = 0;
 
-    for (const item of queue) {
-        try {
-            let result;
-            if (item.type === 'session') {
-                result = await sendSessionToBackend(item.data, true, true);
-            } else {
-                result = await sendToBackend(item.data, true, true);
-            }
+        for (const item of queue) {
+            try {
+                let result;
+                if (item.type === 'session') {
+                    result = await sendSessionToBackend(item.data, true, true);
+                } else {
+                    result = await sendToBackend(item.data, true, true);
+                }
 
-            if (result.success) {
-                successCount++;
-                // 立即从 storage 移除该条目（按 queue_id 精确定位，无索引漂移风险）
-                await removeFromPendingQueueById(item.queue_id);
-            } else {
+                if (result.success) {
+                    successCount++;
+                    // 立即从 storage 移除该条目（按 queue_id 精确定位，无索引漂移风险）
+                    await removeFromPendingQueueById(item.queue_id);
+                } else {
+                    failedCount++;
+                }
+            } catch (e) {
+                console.error('处理队列项失败:', e);
                 failedCount++;
             }
-        } catch (e) {
-            console.error('处理队列项失败:', e);
-            failedCount++;
         }
-    }
 
-    if (successCount > 0 || failedCount > 0) {
-        console.log(`待发送队列处理完成：成功 ${successCount} 条，失败 ${failedCount} 条保留队列`);
+        if (successCount > 0 || failedCount > 0) {
+            console.log(`待发送队列处理完成：成功 ${successCount} 条，失败 ${failedCount} 条保留队列`);
+        }
+    } finally {
+        isProcessingQueue = false;
     }
 }
 
