@@ -235,10 +235,28 @@ function extractQuestionText(questionElement) {
 function extractCategory(questionElement) {
     try {
         const categoryElement = questionElement.querySelector('.secondChapterName');
-        return categoryElement ? categoryElement.textContent.trim() : '';
+        const raw = categoryElement ? categoryElement.textContent.trim() : '';
+        return normalizeCategory(raw);
     } catch (e) {
         return '';
     }
+}
+
+// 标准化分类名：去除"第X章""X."等前缀，截断过长名称
+function normalizeCategory(raw) {
+    if (!raw) return '';
+    let s = raw.trim();
+    // 去除 "第一章" / "第1章" / "第十二章" 等前缀
+    s = s.replace(/^第[一二三四五六七八九十百\d]+[章节卷篇部分]\s*/, '');
+    // 去除 "1." / "1、" / "1:" 等数字前缀
+    s = s.replace(/^\d+[.、:：]\s*/, '');
+    // 去除多余空白
+    s = s.replace(/\s+/g, ' ').trim();
+    // 截断过长名称（限 50 字符）
+    if (s.length > 50) {
+        s = s.substring(0, 50);
+    }
+    return s;
 }
 
 function extractOptions(questionElement) {
