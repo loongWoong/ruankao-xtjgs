@@ -5323,14 +5323,25 @@ def get_case_stats():
 @app.route('/api/textbook/chapters', methods=['GET'])
 @api_response
 def get_textbook_chapters():
+    user_id = get_user_id()
     with get_db_conn() as conn:
         cursor = conn.cursor()
         cursor.execute('''
-            SELECT id, chapter_num, title, summary, word_count, parent_id, level, sort_order
-            FROM textbook_chapters
-            ORDER BY sort_order ASC, id ASC
-        ''')
-        chapters = [dict(row) for row in cursor.fetchall()]
+            SELECT tc.id, tc.chapter_num, tc.title, tc.summary, tc.word_count,
+                   tc.parent_id, tc.level, tc.sort_order,
+                   rp.status as progress_status, rp.read_time as progress_read_time
+            FROM textbook_chapters tc
+            LEFT JOIN reading_progress rp ON rp.chapter_id = tc.id AND rp.user_id = ?
+            ORDER BY tc.sort_order ASC, tc.id ASC
+        ''', (user_id,))
+        chapters = []
+        for row in cursor.fetchall():
+            r = dict(row)
+            r['progress'] = {
+                'status': r.pop('progress_status') or 'unread',
+                'read_time': r.pop('progress_read_time') or 0
+            }
+            chapters.append(r)
     return jsonify({'items': chapters, 'total': len(chapters)})
 
 

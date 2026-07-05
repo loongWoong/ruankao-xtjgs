@@ -46,8 +46,14 @@ function Textbook() {
     loadData();
   }, []);
 
-  const openChapter = async (chapterId) => {
+  const openChapter = async (chapterId, prevChapterId = null) => {
     try {
+      // 切换前上报前一章节的会话阅读时长（后端 read_time 是累加逻辑，不会覆盖）
+      if (prevChapterId && chapterOpenAtRef.current > 0) {
+        const sessionSec = Math.round((Date.now() - chapterOpenAtRef.current) / 1000);
+        const readMinutes = Math.max(1, Math.round(sessionSec / 60));
+        updateReadingProgress(prevChapterId, { status: 'reading', read_time: readMinutes }).catch(() => {});
+      }
       setLoading(true);
       const chapter = await getTextbookChapter(chapterId);
       setCurrentChapter(chapter);
@@ -81,11 +87,11 @@ function Textbook() {
   };
 
   const goPrev = () => {
-    if (currentChapter?.prev_chapter) openChapter(currentChapter.prev_chapter.id);
+    if (currentChapter?.prev_chapter) openChapter(currentChapter.prev_chapter.id, currentChapter.id);
   };
 
   const goNext = () => {
-    if (currentChapter?.next_chapter) openChapter(currentChapter.next_chapter.id);
+    if (currentChapter?.next_chapter) openChapter(currentChapter.next_chapter.id, currentChapter.id);
   };
 
   const handleSearch = async () => {
@@ -105,9 +111,12 @@ function Textbook() {
     }
   };
 
-  const getChapterStatus = (chapterId) => {
+  const getChapterStatus = (chapter) => {
+    // 优先使用章节自带的 progress 字段（后端列表接口已联表查询）
+    if (chapter?.progress?.status) return chapter.progress.status;
+    // 兜底：从 recent_chapters 查找（旧数据兼容）
     if (!progressOverview?.recent_chapters) return null;
-    const found = progressOverview.recent_chapters.find(c => c.id === chapterId);
+    const found = progressOverview.recent_chapters.find(c => c.id === chapter?.id);
     return found ? found.status : null;
   };
 
@@ -130,24 +139,24 @@ function Textbook() {
             <div className="progress-overview">
               <div className="stats-cards">
                 <div className="stat-card">
-                  <div className="stat-value">{progressOverview.total_chapters}</div>
-                  <div className="stat-label">总章节</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value">{progressOverview.completed_count}</div>
-                  <div className="stat-label">已完成</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value">{progressOverview.reading_count}</div>
-                  <div className="stat-label">阅读中</div>
-                </div>
-                <div className="stat-card">
-                  <div className="stat-value">{progressOverview.completion_rate}%</div>
-                  <div className="stat-label">完成率</div>
-                </div>
+                  <div className="stat-value">{progressOverview.total_chapters || 0}</div>
+                <div className="stat-label">总章节</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{progressOverview.completed_count || 0}</div>
+                <div className="stat-label">已完成</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{progressOverview.reading_count || 0}</div>
+                <div className="stat-label">阅读中</div>
+              </div>
+              <div className="stat-card">
+                <div className="stat-value">{progressOverview.completion_rate || 0}%</div>
+                <div className="stat-label">完成率</div>
+              </div>
               </div>
               <div className="progress-bar-container">
-                <div className="progress-bar" style={{ width: `${progressOverview.completion_rate}%` }}></div>
+                <div className="progress-bar" style={{ width: `${progressOverview.completion_rate || 0}%` }}></div>
               </div>
             </div>
           )}
@@ -168,16 +177,16 @@ function Textbook() {
             {chapters.length === 0 ? (
               <div className="empty-state">暂无教材内容</div>
             ) : chapters.map(ch => {
-              const status = getChapterStatus(ch.id);
+              const status = getChapterStatus(ch);
               const st = status ? STATUS_MAP[status] : null;
               return (
                 <div key={ch.id} className="chapter-item" onClick={() => openChapter(ch.id)}>
-                  <div className="chapter-num">第{ch.chapter_num}章</div>
+                  <div className="chapter-num">第{ch.chapter_num || '?'}章</div>
                   <div className="chapter-info">
-                    <h4>{ch.title}</h4>
+                    <h4>{ch.title || '未命名章节'}</h4>
                     {ch.summary && <p className="chapter-summary">{ch.summary}</p>}
                     <div className="chapter-meta">
-                      <span>{ch.word_count}字</span>
+                      <span>{ch.word_count || 0}字</span>
                       {st && <span className="status-tag" style={{ color: st.color, background: st.bg }}>{st.label}</span>}
                     </div>
                   </div>
