@@ -370,17 +370,25 @@ function QuestionBank() {
               <div className="detail-section">
                 <h4>选项</h4>
                 <div className="detail-options">
-                  {selectedQuestion.options && selectedQuestion.options.map((opt, i) => (
-                    <div
-                      key={i}
-                      className={`detail-option ${
-                        opt.startsWith(selectedQuestion.correct_answer) ? 'correct' :
-                        opt === selectedQuestion.user_answer ? 'wrong' : ''
-                      }`}
-                    >
-                      {opt}
-                    </div>
-                  ))}
+                  {selectedQuestion.options && selectedQuestion.options.map((opt, i) => {
+                    // 提取选项前缀字母（如 "A.xxx" → "A"，"B、xxx" → "B"）与正确答案比对
+                    const optPrefix = (opt.match(/^([A-Za-z])/) || [])[1] || '';
+                    const correctLetters = (selectedQuestion.correct_answer || '').toUpperCase().split('');
+                    const isCorrect = optPrefix && correctLetters.includes(optPrefix.toUpperCase());
+                    const userLetters = (selectedQuestion.user_answer || '').toUpperCase().split('');
+                    const isUserChoice = optPrefix && userLetters.includes(optPrefix.toUpperCase());
+                    return (
+                      <div
+                        key={i}
+                        className={`detail-option ${
+                          isCorrect ? 'correct' :
+                          isUserChoice ? 'wrong' : ''
+                        }`}
+                      >
+                        {opt}
+                      </div>
+                    );
+                  })}
                 </div>
               </div>
 

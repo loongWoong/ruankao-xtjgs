@@ -205,8 +205,10 @@ function ReviewQueue() {
         ) : (
           <div style={{ display: 'flex', gap: '0.5rem', flexWrap: 'wrap', padding: '0.5rem' }}>
             {upcoming.map((u, idx) => {
-              const date = new Date(u.review_date);
-              const isToday = u.review_date === new Date().toISOString().split('T')[0];
+              const date = new Date(u.review_date + 'T00:00:00');
+              // 使用本地日期避免 toISOString() 返回 UTC 导致凌晨错位
+              const todayStr = new Date().toLocaleDateString('en-CA');
+              const isToday = u.review_date === todayStr;
               return (
                 <div key={idx} style={{
                   flex: '1 1 100px', minWidth: '100px',
