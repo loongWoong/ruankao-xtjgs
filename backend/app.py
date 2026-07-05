@@ -2520,21 +2520,23 @@ def get_wrong_questions_analysis():
         cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ?', (user_id,))
         total_wrong = cursor.fetchone()[0]
 
-        # 按分类聚合（过滤空 + 测试数据）
+        # 按章节聚合（R25 后章节名存入 chapter 列，category 改为题型分类）
+        # 兼容历史数据：优先 chapter，chapter 为空时回退 category
         cursor.execute('''
-            SELECT category, COUNT(*) as cnt
+            SELECT COALESCE(NULLIF(chapter, ''), category) as chapter, COUNT(*) as cnt
             FROM wrong_questions
-            WHERE user_id = ? AND category != ""
-            GROUP BY category
+            WHERE user_id = ? AND (chapter != "" OR category != "")
+            GROUP BY COALESCE(NULLIF(chapter, ''), category)
             ORDER BY cnt DESC
         ''', (user_id,))
         category_stats = []
         for row in cursor.fetchall():
-            if row['category'] in TEST_CATEGORY_PATTERNS:
+            if row['chapter'] in TEST_CATEGORY_PATTERNS:
                 continue
             percentage = round((row['cnt'] / total_wrong) * 100, 2) if total_wrong > 0 else 0
             category_stats.append({
-                'category': row['category'],
+                'category': row['chapter'],
+                'chapter': row['chapter'],
                 'count': row['cnt'],
                 'percentage': percentage
             })
@@ -2720,7 +2722,7 @@ def get_stats_overview():
         cursor.execute('SELECT COUNT(*) FROM wrong_questions WHERE user_id = ? AND is_mastered = 1', (user_id,))
         mastered_count = cursor.fetchone()[0]
 
-        cursor.execute('SELECT COUNT(DISTINCT category) FROM wrong_questions WHERE category != "" AND user_id = ?', (user_id,))
+        cursor.execute('SELECT COUNT(DISTINCT COALESCE(NULLIF(chapter, ""), category)) FROM wrong_questions WHERE (chapter != "" OR category != "") AND user_id = ?', (user_id,))
         category_count = cursor.fetchone()[0]
 
         cursor.execute('SELECT COUNT(*) FROM practice_attempts WHERE user_id = ?', (user_id,))
@@ -2812,14 +2814,14 @@ def get_stats_category():
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT 
-                category,
+            SELECT
+                COALESCE(NULLIF(chapter, ''), category) as chapter,
                 COUNT(*) as total,
                 SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered
             FROM wrong_questions
-            WHERE category != ""
+            WHERE (chapter != "" OR category != "")
             AND user_id = ?
-            GROUP BY category
+            GROUP BY COALESCE(NULLIF(chapter, ''), category)
             ORDER BY total DESC
         ''', (user_id,))
 
@@ -2829,7 +2831,8 @@ def get_stats_category():
             total = row['total']
             mastered = row['mastered']
             categories.append({
-                'name': row['category'],
+                'name': row['chapter'],
+                'chapter': row['chapter'],
                 'total': total,
                 'mastered': mastered,
                 'not_mastered': total - mastered,
@@ -2879,14 +2882,14 @@ def get_stats_weak_points():
         cursor = conn.cursor()
 
         cursor.execute('''
-            SELECT 
-                category,
+            SELECT
+                COALESCE(NULLIF(chapter, ''), category) as chapter,
                 COUNT(*) as total,
                 SUM(CASE WHEN is_mastered = 0 THEN 1 ELSE 0 END) as not_mastered
             FROM wrong_questions
-            WHERE category != ""
+            WHERE (chapter != "" OR category != "")
             AND user_id = ?
-            GROUP BY category
+            GROUP BY COALESCE(NULLIF(chapter, ''), category)
             HAVING not_mastered > 0
             ORDER BY not_mastered DESC
             LIMIT 10
@@ -2896,13 +2899,14 @@ def get_stats_weak_points():
         weak_points = []
         for row in rows:
             # 过滤测试数据（测试章节/测试分类等）
-            if row['category'] in TEST_CATEGORY_PATTERNS:
+            if row['chapter'] in TEST_CATEGORY_PATTERNS:
                 continue
             total = row['total']
             not_mastered = row['not_mastered']
             weak_rate = round((not_mastered / total) * 100, 2) if total > 0 else 0
             weak_points.append({
-                'name': row['category'],
+                'name': row['chapter'],
+                'chapter': row['chapter'],
                 'total': total,
                 'not_mastered': not_mastered,
                 'weak_rate': weak_rate
@@ -6907,12 +6911,12 @@ def get_error_diagnosis_report():
 
         # 2. 按章节聚合（未掌握错题数）
         cursor.execute('''
-            SELECT category, COUNT(*) as total,
+            SELECT COALESCE(NULLIF(chapter, ''), category) as category, COUNT(*) as total,
                    SUM(CASE WHEN is_mastered = 0 THEN 1 ELSE 0 END) as pending,
                    AVG(wrong_count) as avg_wrong_count
             FROM wrong_questions
-            WHERE user_id = ? AND created_at >= ? AND category != ''
-            GROUP BY category
+            WHERE user_id = ? AND created_at >= ? AND (chapter != '' OR category != '')
+            GROUP BY COALESCE(NULLIF(chapter, ''), category)
             ORDER BY pending DESC
             LIMIT 10
         ''', (user_id, since))
@@ -7162,11 +7166,11 @@ def get_learning_report():
 
         # 3. 错题分类聚合
         cursor.execute('''
-            SELECT category, COUNT(*) as cnt,
+            SELECT COALESCE(NULLIF(chapter, ''), category) as category, COUNT(*) as cnt,
                    SUM(CASE WHEN is_mastered = 1 THEN 1 ELSE 0 END) as mastered
             FROM wrong_questions
-            WHERE user_id = ? AND category != ''
-            GROUP BY category ORDER BY cnt DESC
+            WHERE user_id = ? AND (chapter != '' OR category != '')
+            GROUP BY COALESCE(NULLIF(chapter, ''), category) ORDER BY cnt DESC
         ''', (user_id,))
         by_category = [dict(r) for r in cursor.fetchall()]
 
@@ -7297,8 +7301,8 @@ def export_learning_report():
         cursor.execute('SELECT COUNT(*) FROM study_checkins WHERE user_id = ?', (user_id,))
         total_checkin_days = cursor.fetchone()[0]
         cursor.execute('''
-            SELECT category, COUNT(*) as cnt FROM wrong_questions
-            WHERE user_id = ? AND category != '' GROUP BY category ORDER BY cnt DESC
+            SELECT COALESCE(NULLIF(chapter, ''), category) as category, COUNT(*) as cnt FROM wrong_questions
+            WHERE user_id = ? AND (chapter != '' OR category != '') GROUP BY COALESCE(NULLIF(chapter, ''), category) ORDER BY cnt DESC
         ''', (user_id,))
         by_category = [dict(r) for r in cursor.fetchall()]
         cursor.execute('''

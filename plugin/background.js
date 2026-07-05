@@ -314,9 +314,11 @@ async function sendBatchToBackend(items) {
                     totalUpdated += result.updated || 0;
                     totalFailed += result.failed || 0;
                     success = true;
-                    // 批量发送成功后，标记 question_id 已发送（只更新内存，循环外统一写盘一次）
+                    // 批量发送成功后，标记 question_id 已发送并立即写盘
+                    // （多 chunk 场景下，若延迟到循环外写盘，SW 在 chunk 间被 kill 会丢失标记）
                     const sentIds = chunk.map(item => item && item.question_id).filter(Boolean);
                     markSentBatch(sentIds);
+                    await saveDedupMap();
                     break;
                 }
 
@@ -339,9 +341,6 @@ async function sendBatchToBackend(items) {
             totalQueued += chunk.length;
         }
     }
-
-    // 批量场景只写一次 dedupMap，避免 200 条触发 200 次 chrome.storage.local.set
-    await saveDedupMap();
 
     return {
         success: totalFailed === 0 && totalQueued === 0,
@@ -500,6 +499,8 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
             }
             console.log('采集结果:', response);
             if (response && response.success && response.data) {
+                // 等待初始化完成，避免 SW 重启后 cachedUserId 为空导致数据落到 default_user
+                await ensureInitialized();
                 await sendToBackend(response.data);
             }
         });
@@ -540,6 +541,8 @@ chrome.commands.onCommand.addListener(function(command) {
                 }
                 console.log('快捷键采集结果:', response);
                 if (response && response.success && response.data) {
+                    // 等待初始化完成，避免 SW 重启后 cachedUserId 为空导致数据落到 default_user
+                    await ensureInitialized();
                     await sendToBackend(response.data);
                 }
             });
