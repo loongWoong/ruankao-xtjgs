@@ -50,16 +50,35 @@ function ErrorAnalysis() {
         total_not_mastered: overviewData.total_not_mastered || 0
       });
 
-      const dist = distData.distribution || distData.categories || [];
-      setDistribution(dist);
+      // 后端返回 pie_data（含 category/category_name/count/percentage）+ tag_stats（含 error_count）
+      const pieData = distData.pie_data || [];
+      setDistribution(pieData);
 
-      const weak = distData.weak_points || distData.knowledge_points || [];
-      setWeakPoints(weak.sort((a, b) => (b.error_count || 0) - (a.error_count || 0)).slice(0, 10));
+      // 薄弱知识点来自 tag_stats，按 error_count 降序取前 10
+      const tagStats = distData.tag_stats || [];
+      const weak = tagStats.map(t => ({
+        name: t.name,
+        error_count: t.error_count || 0,
+        mastery_rate: 0 // tag_stats 无 mastery_rate，置 0 让进度条显示红色
+      })).sort((a, b) => b.error_count - a.error_count).slice(0, 10);
+      setWeakPoints(weak);
 
-      const trendList = trendData.trend || trendData.daily || [];
+      // 后端返回 daily_trend（含 date/total_errors）
+      const trendList = trendData.daily_trend || [];
       setTrend(trendList);
 
-      setRecommendations(recData.recommendations || recData.questions || []);
+      // 后端返回 questions（含 kp_name/question{suggestions,question_text,question_type}/related_tags/score/suggestions）
+      const recs = (recData.questions || []).map(q => ({
+        type: q.question?.question_type === 'single' ? '单选题'
+          : q.question?.question_type === 'multiple' ? '多选题'
+          : q.question?.question_type === 'essay' ? '论文题'
+          : (q.question?.question_type || '练习题'),
+        knowledge_point: q.kp_name || '未分类',
+        content: q.question?.question_text || '',
+        reason: (q.suggestions && q.suggestions[0]) || '建议加强该知识点练习',
+        error_count: q.score ? Math.round(q.score) : 0
+      }));
+      setRecommendations(recs);
     } catch (err) {
       console.error('获取数据失败:', err);
       setError(err.message || '获取数据失败');
@@ -151,24 +170,24 @@ function ErrorAnalysis() {
   };
 
   const getTotalErrors = () => {
-    return distribution.reduce((sum, item) => sum + (item.count || item.total || 0), 0);
+    return distribution.reduce((sum, item) => sum + (item.count || item.total || item.error_count || 0), 0);
   };
 
   const getTopCategory = () => {
     if (distribution.length === 0) return { label: '暂无', color: '#999' };
-    const top = distribution.reduce((prev, curr) => 
-      (curr.count || curr.total || 0) > (prev.count || prev.total || 0) ? curr : prev
+    const top = distribution.reduce((prev, curr) =>
+      (curr.count || curr.total || curr.error_count || 0) > (prev.count || prev.total || prev.error_count || 0) ? curr : prev
     );
     const catKey = top.type || top.category;
-    return ERROR_CATEGORIES[catKey] || { label: top.name || catKey, color: '#667eea' };
+    return ERROR_CATEGORIES[catKey] || { label: top.category_name || top.name || catKey, color: '#667eea' };
   };
 
   const getTrendDirection = () => {
     if (trend.length < 2) return 'stable';
     const firstHalf = trend.slice(0, Math.floor(trend.length / 2));
     const secondHalf = trend.slice(Math.floor(trend.length / 2));
-    const firstAvg = firstHalf.reduce((s, d) => s + (d.error_count || d.count || 0), 0) / firstHalf.length;
-    const secondAvg = secondHalf.reduce((s, d) => s + (d.error_count || d.count || 0), 0) / secondHalf.length;
+    const firstAvg = firstHalf.reduce((s, d) => s + (d.total_errors || d.error_count || d.count || 0), 0) / firstHalf.length;
+    const secondAvg = secondHalf.reduce((s, d) => s + (d.total_errors || d.error_count || d.count || 0), 0) / secondHalf.length;
     if (secondAvg > firstAvg * 1.1) return 'up';
     if (secondAvg < firstAvg * 0.9) return 'down';
     return 'stable';
@@ -179,8 +198,9 @@ function ErrorAnalysis() {
   };
 
   const getCategoryLabel = (item) => {
+    if (item.category_name) return item.category_name;
     if (item.name) return item.name;
-    return ERROR_CATEGORIES[item.type || item.category]?.label || (item.type || item.category);
+    return ERROR_CATEGORIES[item.type || item.category]?.label || (item.type || item.category || '未分类');
   };
 
   if (loading) {
@@ -196,7 +216,7 @@ function ErrorAnalysis() {
   const totalErrors = getTotalErrors();
   const topCategory = getTopCategory();
   const trendDirection = getTrendDirection();
-  const maxTrendValue = Math.max(...trend.map(d => d.error_count || d.count || 0), 1);
+  const maxTrendValue = Math.max(...trend.map(d => d.total_errors || d.error_count || d.count || 0), 1);
 
   return (
     <div className="page-container">
@@ -325,7 +345,7 @@ function ErrorAnalysis() {
           <div className="ea-trend-chart">
             <div className="ea-trend-bars">
               {trend.map((day, index) => {
-                const count = day.error_count || day.count || 0;
+                const count = day.total_errors || day.error_count || day.count || 0;
                 const heightPercent = (count / maxTrendValue) * 100;
                 return (
                   <div key={index} className="ea-trend-bar-item" title={`${day.date}: ${count}道`}>
