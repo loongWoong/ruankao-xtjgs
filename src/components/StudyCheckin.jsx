@@ -106,7 +106,7 @@ function StudyCheckin() {
     const [year, month] = calendarMonth.split('-').map(Number);
     const firstDay = new Date(year, month - 1, 1).getDay();
     const daysInMonth = new Date(year, month, 0).getDate();
-    const todayStr = new Date().toISOString().split('T')[0];
+    const todayStr = new Date().toLocaleDateString('en-CA');
     const checkinMap = {};
     calendar.forEach(r => { checkinMap[r.checkin_date] = r; });
 

@@ -151,7 +151,7 @@ function StudyPlan() {
     for (let i = 0; i < 7; i++) {
       const date = new Date(today);
       date.setDate(today.getDate() + i);
-      const dateStr = date.toISOString().split('T')[0];
+      const dateStr = date.toLocaleDateString('en-CA');
       const dayData = weekOverview.find(w => w.task_date === dateStr) || { total_tasks: 0, completed_tasks: 0 };
       days.push({
         date: dateStr,

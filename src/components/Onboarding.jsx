@@ -65,7 +65,7 @@ function Onboarding({ onClose }) {
   const defaultExamDate = () => {
     const d = new Date();
     d.setMonth(d.getMonth() + 3);
-    return d.toISOString().split('T')[0];
+    return d.toLocaleDateString('en-CA');
   };
 
   return (
@@ -145,7 +145,7 @@ function Onboarding({ onClose }) {
                   type="date"
                   className="sp-form-input"
                   value={formData.exam_date}
-                  min={new Date().toISOString().split('T')[0]}
+                  min={new Date().toLocaleDateString('en-CA')}
                   onChange={e => setFormData(prev => ({ ...prev, exam_date: e.target.value }))}
                 />
                 <div style={{ fontSize: '0.85rem', color: '#888', marginTop: '0.4rem' }}>
