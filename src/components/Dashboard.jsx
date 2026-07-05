@@ -69,7 +69,7 @@ function Dashboard() {
 
       setStats(statsData);
       setCognitionMap(cognitionData.cognition_map || []);
-      setDailyStats(dailyData.daily_stats || dailyData.daily || []);
+      setDailyStats(dailyData.daily_stats || []);
       setCategoryStats(categoryData.categories || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
       setReviewSummary(reviewData.stats || { today_count: 0, overdue_count: 0, total_pending: 0 });
