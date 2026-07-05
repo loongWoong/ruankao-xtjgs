@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   getWrongQuestions,
   deleteWrongQuestion,
@@ -23,6 +23,9 @@ function QuestionBank() {
     is_mastered: '',
     search: ''
   });
+  // 搜索防抖：filter.search 立即更新输入框，debouncedSearch 300ms 后才触发请求
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimer = useRef(null);
   const [toast, setToast] = useState(null);
   const [classifying, setClassifying] = useState(false);
 
@@ -42,9 +45,21 @@ function QuestionBank() {
     }
   };
 
+  // 输入时清掉旧 timer，300ms 后才把 search 同步到 debouncedSearch
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(filter.search);
+    }, 300);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [filter.search]);
+
   useEffect(() => {
     fetchQuestions();
-  }, [page, filter]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [page, filter.category, filter.is_mastered, debouncedSearch]);
 
   const showToast = (message, type = 'success') => {
     setToast({ message, type });
@@ -57,7 +72,9 @@ function QuestionBank() {
       const params = {
         page: page,
         limit: 50,
-        ...filter
+        category: filter.category,
+        is_mastered: filter.is_mastered,
+        search: debouncedSearch
       };
 
       const data = await getWrongQuestions(params);

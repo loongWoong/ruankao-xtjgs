@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   getTextbookChapters,
   getTextbookChapter,
@@ -22,6 +22,8 @@ function Textbook() {
   const [progressOverview, setProgressOverview] = useState(null);
   const [searchKeyword, setSearchKeyword] = useState('');
   const [searchResults, setSearchResults] = useState([]);
+  // 记录当前章节打开时的时间戳，用于计算实际阅读秒数
+  const chapterOpenAtRef = useRef(0);
 
   const loadData = async () => {
     setLoading(true);
@@ -50,8 +52,10 @@ function Textbook() {
       const chapter = await getTextbookChapter(chapterId);
       setCurrentChapter(chapter);
       setView('reading');
-      // 标记为阅读中
-      updateReadingProgress(chapterId, { status: 'reading', read_time: 0 }).catch(() => {});
+      // 记录打开时刻，markCompleted 时用于计算实际阅读时长
+      chapterOpenAtRef.current = Date.now();
+      // 标记为阅读中（不传 read_time，由后端保留历史累计值）
+      updateReadingProgress(chapterId, { status: 'reading' }).catch(() => {});
     } catch (err) {
       setError(err.message);
     } finally {
@@ -62,7 +66,13 @@ function Textbook() {
   const markCompleted = async () => {
     if (!currentChapter) return;
     try {
-      await updateReadingProgress(currentChapter.id, { status: 'completed', read_time: 60 });
+      // 计算本次会话实际阅读秒数：从打开章节到现在
+      const sessionSec = chapterOpenAtRef.current > 0
+        ? Math.round((Date.now() - chapterOpenAtRef.current) / 1000)
+        : 0;
+      // 转为分钟（最少 1 分钟避免 0）
+      const readMinutes = Math.max(1, Math.round(sessionSec / 60));
+      await updateReadingProgress(currentChapter.id, { status: 'completed', read_time: readMinutes });
       const updated = await getTextbookChapter(currentChapter.id);
       setCurrentChapter(updated);
     } catch (err) {
