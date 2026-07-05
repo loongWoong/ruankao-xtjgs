@@ -40,12 +40,23 @@ function getUserId() {
     return cachedUserId || 'default_user';
 }
 
-// 初始加载
-loadUserId();
-
 let dedupMap = {};
 
-loadDedupMap();
+// 初始化门控：SW 重启后 loadUserId/loadDedupMap 未完成前，消息处理需等待
+// 否则 getUserId() 返回 'default_user'、isDuplicate() 漏判，导致数据落库到错误用户或重复入库
+let initialized = false;
+const initPromise = Promise.all([loadUserId(), loadDedupMap()]).then(() => {
+    initialized = true;
+}).catch(e => {
+    console.error('background 初始化失败:', e);
+    initialized = true;  // 即使失败也放行，避免永久阻塞
+});
+
+async function ensureInitialized() {
+    if (!initialized) {
+        await initPromise;
+    }
+}
 
 chrome.runtime.onInstalled.addListener(function() {
     console.log('软考达人做题记录采集插件已安装');
@@ -118,11 +129,14 @@ function unmarkSent(questionId) {
     }
 }
 
-async function addToPendingQueue(data) {
+async function addToPendingQueue(data, type) {
     try {
         const result = await chrome.storage.local.get(PENDING_QUEUE_KEY);
         const queue = result[PENDING_QUEUE_KEY] || [];
+        // 为每条分配唯一 queue_id，便于逐条原子删除（避免索引漂移）
         queue.push({
+            queue_id: Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
+            type: type || 'question',
             data: data,
             timestamp: Date.now(),
             retryCount: 0
@@ -284,7 +298,7 @@ async function sendBatchToBackend(items) {
         if (!success) {
             // 批量发送失败：整块加入离线队列，且不清除 dedupMap（这些 qid 本就未标记）
             for (const item of chunk) {
-                await addToPendingQueue(item);
+                await addToPendingQueue(item, 'question');
             }
             totalQueued += chunk.length;
         }
@@ -348,7 +362,7 @@ async function sendSessionToBackend(sessionData, skipQueueOnFail = false, skipHi
 
     // 失败：入离线队列 + 本地历史标记未同步（processPendingQueue 调用时跳过）
     if (!skipQueueOnFail) {
-        await addToPendingQueue({ type: 'session', data: sessionData });
+        await addToPendingQueue(sessionData, 'session');
     }
     if (!skipHistoryOnFail) {
         await appendSessionHistory({
@@ -385,46 +399,56 @@ async function getSessionHistory() {
 }
 
 async function processPendingQueue() {
+    await ensureInitialized();
     const queue = await getPendingQueue();
     if (queue.length === 0) return;
 
     console.log(`开始处理待发送队列，共 ${queue.length} 条`);
 
-    const remaining = [];
+    // 逐条原子处理：每条成功后立即按 queue_id 从 storage 移除
+    // 避免 SW 中途死亡时已发条目仍留在队列，下次重发触发 UPSERT UPDATE 累加 wrong_count
     let successCount = 0;
+    let failedCount = 0;
 
     for (const item of queue) {
         try {
             let result;
-            // 支持两种队列项：单题（默认）和练习会话（type: 'session'）
             if (item.type === 'session') {
-                // skipQueueOnFail + skipHistoryOnFail：失败时由 remaining 统一管理，
-                // 不再重复入队或追加历史（避免 popup 历史列表污染）
                 result = await sendSessionToBackend(item.data, true, true);
-                if (result.success) {
-                    successCount++;
-                } else {
-                    remaining.push(item);
-                }
             } else {
-                // skipQueueOnFail=true：失败时由 remaining 处理，不再重复入队
                 result = await sendToBackend(item.data, true, true);
-                if (result.success) {
-                    successCount++;
-                } else {
-                    remaining.push(item);
-                }
+            }
+
+            if (result.success) {
+                successCount++;
+                // 立即从 storage 移除该条目（按 queue_id 精确定位，无索引漂移风险）
+                await removeFromPendingQueueById(item.queue_id);
+            } else {
+                failedCount++;
             }
         } catch (e) {
             console.error('处理队列项失败:', e);
-            remaining.push(item);
+            failedCount++;
         }
     }
 
-    await setPendingQueue(remaining);
+    if (successCount > 0 || failedCount > 0) {
+        console.log(`待发送队列处理完成：成功 ${successCount} 条，失败 ${failedCount} 条保留队列`);
+    }
+}
 
-    if (successCount > 0) {
-        console.log(`待发送队列处理完成：成功 ${successCount} 条，剩余 ${remaining.length} 条`);
+// 按 queue_id 从 pending_queue 中移除一条（原子操作）
+async function removeFromPendingQueueById(queueId) {
+    if (!queueId) return;
+    try {
+        const result = await chrome.storage.local.get(PENDING_QUEUE_KEY);
+        const queue = result[PENDING_QUEUE_KEY] || [];
+        const idx = queue.findIndex(x => x.queue_id === queueId);
+        if (idx < 0) return;  // 可能已被并发移除
+        queue.splice(idx, 1);
+        await chrome.storage.local.set({ [PENDING_QUEUE_KEY]: queue });
+    } catch (e) {
+        console.error('移除队列条目失败:', e);
     }
 }
 
@@ -486,7 +510,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     if (request.action === 'sendToBackend') {
         console.log('收到发送到后端的请求:', request.data);
 
-        sendToBackend(request.data)
+        ensureInitialized().then(() => sendToBackend(request.data))
             .then(result => {
                 sendResponse(result);
             })
@@ -499,7 +523,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     } else if (request.action === 'sendBatchToBackend') {
         console.log('收到批量发送到后端的请求，共', (request.items || []).length, '条');
 
-        sendBatchToBackend(request.items)
+        ensureInitialized().then(() => sendBatchToBackend(request.items))
             .then(result => {
                 sendResponse(result);
             })
@@ -549,7 +573,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         return true;
     } else if (request.action === 'loadStats') {
         // popup 通过 background 中转拉取统计，避免 popup 直接跨域请求
-        fetch(API_URL.replace('/wrong-questions', '/stats/overview'), {
+        // 必须携带 user_id，否则后端返回 default_user 的统计，与采集的数据脱节
+        const statsUrl = API_URL.replace('/wrong-questions', '/stats/overview') +
+                         '?user_id=' + encodeURIComponent(getUserId());
+        fetch(statsUrl, {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         })
@@ -563,7 +590,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         return true;
     } else if (request.action === 'sendSession') {
         console.log('收到练习会话发送请求:', request.data && request.data.paper_name);
-        sendSessionToBackend(request.data)
+        ensureInitialized().then(() => sendSessionToBackend(request.data))
             .then(result => {
                 sendResponse(result);
             })
