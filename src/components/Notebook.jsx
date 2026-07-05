@@ -2,7 +2,6 @@ import React, { useState, useEffect } from 'react';
 import {
   createNote,
   getNotes,
-  getNote,
   updateNote,
   deleteNote,
   addFavorite,
@@ -10,8 +9,6 @@ import {
   getFavorites,
   getFlashcards,
   createFlashcard,
-  updateFlashcard,
-  deleteFlashcard,
   reviewFlashcard,
   getFlashcardStats
 } from '../utils/api';
@@ -139,6 +136,7 @@ const NoteTab = () => {
       setIsEditing(false);
     } catch (err) {
       console.error('保存笔记失败:', err);
+      alert('保存笔记失败: ' + (err.message || '未知错误'));
     }
   };
 
@@ -227,7 +225,7 @@ const NoteTab = () => {
                   </span>
                 </div>
                 <p className="nb-note-summary">
-                  {note.content ? note.content.substring(0, 80) : '暂无内容'}...
+                  {note.content ? note.content.substring(0, 80) + '...' : '暂无内容'}
                 </p>
                 <div className="nb-note-meta">
                   <div className="nb-note-tags">
@@ -469,6 +467,7 @@ const FlashcardTab = () => {
       }
     } catch (err) {
       console.error('复习卡片失败:', err);
+      alert('复习卡片失败: ' + (err.message || '未知错误'));
     }
   };
 
@@ -478,11 +477,14 @@ const FlashcardTab = () => {
       return;
     }
     try {
+      // 后端 difficulty 字段是 INTEGER (1-5)，前端 select 值是字符串 easy/medium/hard，需映射为数字
+      const difficultyMap = { easy: 1, medium: 3, hard: 5 };
+      const difficultyValue = difficultyMap[newDifficulty] || 3;
       await createFlashcard({
         kp_id: newKpId || null,
         front: newFront,
         back: newBack,
-        difficulty: newDifficulty
+        difficulty: difficultyValue
       });
       setShowAddModal(false);
       setNewFront('');
@@ -492,6 +494,7 @@ const FlashcardTab = () => {
       fetchCards();
     } catch (err) {
       console.error('创建卡片失败:', err);
+      alert('创建卡片失败: ' + (err.message || '未知错误'));
     }
   };
 
