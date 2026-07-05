@@ -37,6 +37,11 @@
   --radius-md: 8px;
   --radius-lg: 12px;
 
+  /* 布局尺寸 */
+  --header-height: 56px;
+  --sidebar-width: 200px;
+  --page-padding: 1.5rem;
+
   /* z-index 层级 */
   --z-header: 100;
   --z-sidebar: 200;
@@ -620,7 +625,8 @@ button:focus-visible,
 .split-view {
   display: flex;
   gap: 1.25rem;
-  height: calc(100vh - 140px);
+  /* header(56) + page-padding×2(48) + page-title(~37) ≈ 141px */
+  height: calc(100vh - var(--header-height) - var(--page-padding) * 2 - 2.5rem);
 }
 
 .split-view-list {
@@ -1436,7 +1442,7 @@ button:focus-visible,
   text-align: right;
 }
 
-@media (max-width: 900px) {
+@media (max-width: 1024px) {
   .kg-stats {
     grid-template-columns: repeat(2, 1fr);
   }
@@ -2200,6 +2206,17 @@ button:focus-visible,
   flex-shrink: 0;
 }
 
+.me-legend-dot.answered {
+  background: #e8f5e9;
+  border-color: #4caf50;
+}
+
+.me-legend-dot.current {
+  background: #667eea;
+  border-color: #667eea;
+}
+
+/* 向后兼容：保留 .me-nav-answered / .me-nav-current 复用（图例场景）*/
 .me-legend-dot.me-nav-answered {
   background: #e8f5e9;
   border-color: #4caf50;
@@ -2254,6 +2271,23 @@ button:focus-visible,
 
 .me-options {
   gap: 0.75rem;
+}
+
+/* MockExam 选项覆盖 .practice-option 的样式（考试视图与练习视图区分）*/
+.me-options .practice-option {
+  padding: 0.875rem 1rem;
+  border-width: 1px;
+  cursor: default;
+}
+
+.me-options .practice-option:hover {
+  border-color: #e0e0e0;
+  background: #fafafa;
+}
+
+.me-options .practice-option.selected {
+  border-color: #667eea;
+  background: #f0f4ff;
 }
 
 .me-option {
@@ -3041,8 +3075,9 @@ button:focus-visible,
 .nb-notes-container {
   display: flex;
   gap: 1.25rem;
-  height: calc(100vh - 240px);
-  min-height: 500px;
+  /* header(56) + page-padding×2(48) + page-title(37) + page-subtitle(25) + nb-tabs(50) + margin(24) ≈ 240px */
+  height: calc(100vh - var(--header-height) - var(--page-padding) * 2 - 9rem);
+  min-height: 400px;
 }
 
 .nb-notes-sidebar {

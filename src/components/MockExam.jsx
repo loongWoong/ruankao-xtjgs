@@ -488,11 +488,11 @@ function MockExam() {
             </div>
             <div className="me-nav-legend">
               <div className="me-legend-item">
-                <span className="me-legend-dot me-nav-answered"></span>
+                <span className="me-legend-dot answered"></span>
                 <span>已答</span>
               </div>
               <div className="me-legend-item">
-                <span className="me-legend-dot me-nav-current"></span>
+                <span className="me-legend-dot current"></span>
                 <span>当前</span>
               </div>
               <div className="me-legend-item">
@@ -551,10 +551,11 @@ function MockExam() {
                 </button>
               ) : (
                 <button
-                  className="btn btn-primary"
-                  onClick={() => setShowSubmitConfirm(true)}
+                  className="btn btn-secondary"
+                  disabled
+                  title="已是最后一题，请使用底部的提交试卷按钮"
                 >
-                  提交试卷
+                  已是最后一题
                 </button>
               )}
             </div>
