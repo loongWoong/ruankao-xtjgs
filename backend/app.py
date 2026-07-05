@@ -3863,12 +3863,13 @@ def get_mock_exam_stats():
     with get_db_conn() as conn:
         cursor = conn.cursor()
 
-        cursor.execute('SELECT COUNT(*) FROM mock_exams WHERE user_id = ?', (user_id,))
+        # total_exams 仅统计已提交，draft 不计入"模考次数"
+        cursor.execute("SELECT COUNT(*) FROM mock_exams WHERE user_id = ? AND status = 'submitted'", (user_id,))
         total_exams = cursor.fetchone()[0]
 
         cursor.execute('''
             SELECT AVG(score) as avg_score, MAX(score) as max_score
-            FROM mock_exams 
+            FROM mock_exams
             WHERE user_id = ? AND status = 'submitted'
         ''', (user_id,))
         score_row = cursor.fetchone()
@@ -3883,7 +3884,7 @@ def get_mock_exam_stats():
             ORDER BY date DESC
             LIMIT 10
         ''', (user_id,))
-        
+
         recent_trend = []
         for row in cursor.fetchall():
             recent_trend.append({
@@ -5567,19 +5568,22 @@ def get_real_exam_stats():
     user_id = get_user_id()
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT COUNT(*) FROM mock_exams WHERE user_id = ? AND exam_type = 'real'", (user_id,))
+        # total_exams 仅统计已提交的真题模考，draft 不计入"模考次数"
+        cursor.execute("SELECT COUNT(*) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND status = 'submitted'", (user_id,))
         total_exams = cursor.fetchone()[0]
-        cursor.execute("SELECT AVG(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND score IS NOT NULL", (user_id,))
+        cursor.execute("SELECT AVG(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND status = 'submitted' AND score IS NOT NULL", (user_id,))
         avg_score = cursor.fetchone()[0]
-        cursor.execute("SELECT MAX(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND score IS NOT NULL", (user_id,))
+        avg_score = round(avg_score, 2) if avg_score is not None else 0
+        cursor.execute("SELECT MAX(score) FROM mock_exams WHERE user_id = ? AND exam_type = 'real' AND status = 'submitted' AND score IS NOT NULL", (user_id,))
         best_score = cursor.fetchone()[0]
+        best_score = round(best_score, 2) if best_score is not None else 0
         cursor.execute('SELECT COUNT(*) FROM real_exam_questions')
         total_questions = cursor.fetchone()[0]
 
         cursor.execute('''
             SELECT id, title, score, correct_count, total_questions, submitted_at
             FROM mock_exams
-            WHERE user_id = ? AND exam_type = 'real'
+            WHERE user_id = ? AND exam_type = 'real' AND status = 'submitted'
             ORDER BY created_at DESC LIMIT 10
         ''', (user_id,))
         recent = [dict(row) for row in cursor.fetchall()]
