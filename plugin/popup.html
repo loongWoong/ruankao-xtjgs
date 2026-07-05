@@ -222,6 +222,37 @@
             text-align: center;
             padding: 12px 0;
         }
+        .settings-section {
+            margin: 8px 0;
+        }
+        .setting-row {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            margin-bottom: 4px;
+        }
+        .setting-label {
+            font-size: 12px;
+            color: #555;
+            min-width: 56px;
+        }
+        .setting-input {
+            flex: 1;
+            padding: 4px 8px;
+            border: 1px solid #ddd;
+            border-radius: 4px;
+            font-size: 13px;
+            color: #333;
+            outline: none;
+        }
+        .setting-input:focus {
+            border-color: #667eea;
+        }
+        .setting-hint {
+            font-size: 11px;
+            color: #aaa;
+            margin-top: 2px;
+        }
     </style>
 </head>
 <body>
@@ -264,6 +295,17 @@
     <div class="history-section">
         <div class="history-title">最近采集</div>
         <div id="sessionHistory" class="history-list"></div>
+    </div>
+
+    <div class="divider"></div>
+
+    <div class="settings-section">
+        <div class="history-title">采集设置</div>
+        <div class="setting-row">
+            <label for="userIdInput" class="setting-label">用户标识</label>
+            <input type="text" id="userIdInput" class="setting-input" placeholder="default_user" maxlength="50">
+        </div>
+        <div class="setting-hint">用于区分不同用户的采集数据</div>
     </div>
 
     <div class="divider"></div>

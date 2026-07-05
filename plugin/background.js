@@ -4,12 +4,44 @@ const SESSION_API_URL = 'http://localhost:5002/api/practice-sessions';
 const PENDING_QUEUE_KEY = 'pending_queue';
 const DEDUP_KEY = 'dedup_map';
 const SESSION_HISTORY_KEY = 'session_history';
+const USER_ID_STORAGE_KEY = 'plugin_user_id';
 const DEDUP_TTL = 5 * 60 * 1000;
 const MAX_RETRIES = 3;
 const ALARM_NAME = 'retry_pending_queue';
 const ALARM_INTERVAL = 0.5;
 const BATCH_CHUNK_SIZE = 200;
 const SESSION_HISTORY_LIMIT = 20;
+
+// 读取 popup 配置的 user_id（缓存，避免每次发送都读 storage）
+let cachedUserId = '';
+let userIdLoaded = false;
+
+async function loadUserId() {
+    try {
+        const result = await chrome.storage.local.get(USER_ID_STORAGE_KEY);
+        cachedUserId = result[USER_ID_STORAGE_KEY] || '';
+        userIdLoaded = true;
+    } catch (e) {
+        console.error('加载 user_id 失败:', e);
+        cachedUserId = '';
+        userIdLoaded = true;
+    }
+}
+
+// 监听 storage 变化，实时刷新缓存
+chrome.storage.onChanged.addListener(function(changes, areaName) {
+    if (areaName === 'local' && changes[USER_ID_STORAGE_KEY]) {
+        cachedUserId = changes[USER_ID_STORAGE_KEY].newValue || '';
+        console.log('user_id 已更新:', cachedUserId || '(default_user)');
+    }
+});
+
+function getUserId() {
+    return cachedUserId || 'default_user';
+}
+
+// 初始加载
+loadUserId();
 
 let dedupMap = {};
 
@@ -113,6 +145,11 @@ async function sendToBackend(data, skipDedup = false) {
         return { success: true, skipped: true, reason: 'duplicate' };
     }
 
+    // 注入 popup 配置的 user_id（若 data 未显式携带）
+    if (!data.user_id) {
+        data.user_id = getUserId();
+    }
+
     let lastError = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
@@ -192,7 +229,7 @@ async function sendBatchToBackend(items) {
                 const response = await fetch(BATCH_API_URL, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ questions: chunk })
+                    body: JSON.stringify({ questions: chunk, user_id: getUserId() })
                 });
 
                 if (response.ok) {
@@ -238,6 +275,10 @@ async function sendBatchToBackend(items) {
 async function sendSessionToBackend(sessionData) {
     // 发送练习会话结果到后端。带 3 次重试，失败入离线队列（复用 pending_queue）。
     // 成功后写入本地 session_history 供 popup 展示最近采集。
+    if (!sessionData.user_id) {
+        sessionData.user_id = getUserId();
+    }
+
     let lastError = null;
 
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {

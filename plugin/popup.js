@@ -3,13 +3,62 @@ document.addEventListener('DOMContentLoaded', function() {
     checkBackendStatus();
     loadPendingQueueCount();
     loadSessionHistory();
+    loadUserIdSetting();
 
     document.getElementById('retryQueueBtn').addEventListener('click', function() {
         retryPendingQueue();
     });
 
     document.getElementById('collectSession').addEventListener('click', collectPracticeSession);
+
+    // user_id 输入失焦时保存
+    const userIdInput = document.getElementById('userIdInput');
+    if (userIdInput) {
+        userIdInput.addEventListener('blur', function() {
+            saveUserIdSetting(this.value.trim());
+        });
+        userIdInput.addEventListener('keydown', function(e) {
+            if (e.key === 'Enter') {
+                this.blur();
+            }
+        });
+    }
 });
+
+const USER_ID_STORAGE_KEY = 'plugin_user_id';
+
+function loadUserIdSetting() {
+    try {
+        chrome.storage.local.get(USER_ID_STORAGE_KEY, function(result) {
+            const input = document.getElementById('userIdInput');
+            if (input) {
+                input.value = result[USER_ID_STORAGE_KEY] || '';
+            }
+        });
+    } catch (e) {
+        console.error('加载 user_id 失败:', e);
+    }
+}
+
+function saveUserIdSetting(value) {
+    // 空值允许（表示用后端默认 default_user）
+    const trimmed = (value || '').substring(0, 50);
+    try {
+        chrome.storage.local.set({ [USER_ID_STORAGE_KEY]: trimmed }, function() {
+            const statusDiv = document.getElementById('status');
+            if (statusDiv && trimmed) {
+                statusDiv.className = 'info';
+                statusDiv.textContent = '已保存用户标识：' + trimmed;
+                setTimeout(function() {
+                    statusDiv.textContent = '';
+                    statusDiv.className = '';
+                }, 2000);
+            }
+        });
+    } catch (e) {
+        console.error('保存 user_id 失败:', e);
+    }
+}
 
 function loadStats() {
     try {
