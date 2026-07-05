@@ -7,26 +7,30 @@ function Statistics() {
   const [weakPoints, setWeakPoints] = useState([]);
   const [dailyStats, setDailyStats] = useState([]);
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
+    setLoading(true);
+    setError(null);
     try {
       const [categoryData, chapterData, weakPointsData, dailyData] = await Promise.all([
-        fetchAPI('/api/stats/category'),
-        fetchAPI('/api/stats/chapter'),
-        fetchAPI('/api/stats/weak-points'),
-        fetchAPI('/api/stats/daily?days=30')
+        fetchAPI('/api/stats/category').catch(() => ({ categories: [] })),
+        fetchAPI('/api/stats/chapter').catch(() => ({ chapters: [] })),
+        fetchAPI('/api/stats/weak-points').catch(() => ({ weak_points: [] })),
+        fetchAPI('/api/stats/daily?days=30').catch(() => ({ daily_stats: [] }))
       ]);
 
-      setCategoryStats(categoryData.categories || []);
-      setChapterStats(chapterData.chapters || []);
-      setWeakPoints(weakPointsData.weak_points || []);
-      setDailyStats(dailyData.daily_stats || []);
+      setCategoryStats(categoryData?.categories || []);
+      setChapterStats(chapterData?.chapters || []);
+      setWeakPoints(weakPointsData?.weak_points || []);
+      setDailyStats(dailyData?.daily_stats || []);
     } catch (error) {
       console.error('获取统计数据失败:', error);
+      setError(error.message || '获取统计数据失败');
     } finally {
       setLoading(false);
     }
@@ -36,13 +40,19 @@ function Statistics() {
     return <div className="page-container"><div className="empty-state">加载中...</div></div>;
   }
 
-  const totalQuestions = categoryStats.reduce((sum, cat) => sum + cat.total, 0);
-  const totalMastered = categoryStats.reduce((sum, cat) => sum + cat.mastered, 0);
+  const totalQuestions = categoryStats.reduce((sum, cat) => sum + (cat.total || 0), 0);
+  const totalMastered = categoryStats.reduce((sum, cat) => sum + (cat.mastered || 0), 0);
   const overallRate = totalQuestions > 0 ? ((totalMastered / totalQuestions) * 100).toFixed(1) : 0;
 
   return (
     <div className="page-container">
       <h1 className="page-title">统计分析</h1>
+
+      {error && (
+        <div className="error-banner" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#fee2e2', color: '#dc2626', borderRadius: '6px', cursor: 'pointer' }} onClick={() => setError(null)}>
+          {error} <span style={{ float: 'right' }}>点击关闭</span>
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="stat-card">
@@ -88,14 +98,14 @@ function Statistics() {
               {categoryStats.length > 0 ? (
                 categoryStats.map((cat, index) => (
                   <tr key={index}>
-                    <td>{cat.name}</td>
-                    <td>{cat.total}</td>
-                    <td style={{ color: '#4caf50' }}>{cat.mastered}</td>
-                    <td style={{ color: '#f44336' }}>{cat.total - cat.mastered}</td>
-                    <td>{cat.mastery_rate}%</td>
+                    <td>{cat.name || '未分类'}</td>
+                    <td>{cat.total || 0}</td>
+                    <td style={{ color: '#4caf50' }}>{cat.mastered || 0}</td>
+                    <td style={{ color: '#f44336' }}>{(cat.total || 0) - (cat.mastered || 0)}</td>
+                    <td>{cat.mastery_rate || 0}%</td>
                     <td>
                       <div className="table-progress">
-                        <div className="table-progress-bar" style={{ width: `${cat.mastery_rate}%` }} />
+                        <div className="table-progress-bar" style={{ width: `${cat.mastery_rate || 0}%` }} />
                       </div>
                     </td>
                   </tr>
@@ -127,11 +137,11 @@ function Statistics() {
               {chapterStats.length > 0 ? (
                 chapterStats.slice(0, 20).map((ch, index) => (
                   <tr key={index}>
-                    <td>{ch.name}</td>
-                    <td>{ch.category}</td>
-                    <td>{ch.total}</td>
-                    <td style={{ color: '#4caf50' }}>{ch.mastered}</td>
-                    <td>{ch.mastery_rate}%</td>
+                    <td>{ch.name || '未命名'}</td>
+                    <td>{ch.category || '-'}</td>
+                    <td>{ch.total || 0}</td>
+                    <td style={{ color: '#4caf50' }}>{ch.mastered || 0}</td>
+                    <td>{ch.mastery_rate || 0}%</td>
                   </tr>
                 ))
               ) : (
@@ -152,13 +162,13 @@ function Statistics() {
               <div className="weak-point-item" key={index}>
                 <div className="weak-point-rank">{index + 1}</div>
                 <div className="weak-point-info">
-                  <div className="weak-point-name">{point.name}</div>
+                  <div className="weak-point-name">{point.name || '未命名'}</div>
                   <div className="weak-point-stats">
-                    共 {point.total} 题 | 未掌握 {point.not_mastered} 题
+                    共 {point.total || 0} 题 | 未掌握 {point.not_mastered || 0} 题
                   </div>
                 </div>
                 <div className="weak-point-rate">
-                  <div>掌握率 {100 - point.weak_rate}%</div>
+                  <div>掌握率 {100 - (point.weak_rate || 0)}%</div>
                 </div>
               </div>
             ))}
@@ -176,15 +186,19 @@ function Statistics() {
         {dailyStats.length > 0 ? (
           <div className="trend-chart">
             <div className="trend-bars">
-              {dailyStats.map((day, index) => (
-                <div key={index} className="trend-bar-item">
-                  <div
-                    className="trend-bar"
-                    style={{ height: `${day.practiced > 0 ? (day.practiced / Math.max(...dailyStats.map(d => d.practiced), 1) * 100) : 0}%` }}
-                    title={`练习: ${day.practiced}, 正确率: ${day.correct_rate}%`}
-                  />
-                </div>
-              ))}
+              {dailyStats.map((day, index) => {
+                const practiced = day.practiced || 0;
+                const maxPracticed = Math.max(...dailyStats.map(d => d.practiced || 0), 1);
+                return (
+                  <div key={index} className="trend-bar-item">
+                    <div
+                      className="trend-bar"
+                      style={{ height: `${practiced > 0 ? (practiced / maxPracticed * 100) : 0}%` }}
+                      title={`练习: ${practiced}, 正确率: ${day.correct_rate || 0}%`}
+                    />
+                  </div>
+                );
+              })}
             </div>
             <div className="trend-labels">
               <span>每日练习题数</span>
