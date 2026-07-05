@@ -7117,8 +7117,10 @@ def cleanup_test_data():
 
         deleted = 0
         for c in candidates:
-            # 同步清理 question_mapping / practice_attempts 由外键级联（如有），这里显式清理 mapping
+            # 同步清理 question_mapping / practice_attempts
             cursor.execute('DELETE FROM question_mapping WHERE question_id = ?', (c['id'],))
+            cursor.execute('DELETE FROM practice_attempts WHERE question_id = ?', (c['id'],))
+            cursor.execute('DELETE FROM practice_reflections WHERE question_id = ?', (c['id'],))
             cursor.execute('DELETE FROM wrong_questions WHERE id = ?', (c['id'],))
             deleted += 1
         conn.commit()
@@ -7128,6 +7130,76 @@ def cleanup_test_data():
         'matched': len(candidates),
         'deleted': deleted,
         'candidates': candidates
+    })
+
+
+@app.route('/api/admin/backfill-counts', methods=['POST'])
+@api_response
+def backfill_counts():
+    """从 practice_attempts 回填 wrong_questions 的 correct_count / wrong_count / review_count。
+    修复早期数据缺失：update_srs 在 Phase-6B 之前不更新 correct_count/wrong_count，
+    导致 QuestionBank 永远显示 "❌ 0 次"。
+    """
+    body = request.get_json(silent=True) or {}
+    target_user = body.get('user_id')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+
+        # 找出所有 wrong_questions
+        if target_user:
+            cursor.execute('SELECT id FROM wrong_questions WHERE user_id = ?', (target_user,))
+        else:
+            cursor.execute('SELECT id FROM wrong_questions')
+        wq_ids = [r['id'] for r in cursor.fetchall()]
+
+        updated = 0
+        details = []
+        for qid in wq_ids:
+            cursor.execute('''
+                SELECT
+                    COUNT(*) as total,
+                    SUM(CASE WHEN is_correct = 1 THEN 1 ELSE 0 END) as correct,
+                    SUM(CASE WHEN is_correct = 0 THEN 1 ELSE 0 END) as wrong
+                FROM practice_attempts
+                WHERE question_id = ?
+            ''', (qid,))
+            row = cursor.fetchone()
+            total = row['total'] or 0
+            correct = row['correct'] or 0
+            wrong = row['wrong'] or 0
+
+            if total > 0:
+                cursor.execute('''
+                    UPDATE wrong_questions
+                    SET correct_count = ?, wrong_count = ?, review_count = MAX(review_count, ?)
+                    WHERE id = ?
+                ''', (correct, wrong, total, qid))
+                updated += 1
+                details.append({'question_id': qid, 'correct': correct, 'wrong': wrong, 'total': total})
+
+        # 清理孤立的 practice_attempts（question_id 不在 wrong_questions 中）
+        cursor.execute('''
+            SELECT COUNT(*) FROM practice_attempts
+            WHERE question_id NOT IN (SELECT id FROM wrong_questions)
+        ''')
+        orphaned_count = cursor.fetchone()[0]
+        cursor.execute('''
+            DELETE FROM practice_attempts
+            WHERE question_id NOT IN (SELECT id FROM wrong_questions)
+        ''')
+        # 同步清理孤立的 practice_reflections
+        cursor.execute('''
+            DELETE FROM practice_reflections
+            WHERE question_id NOT IN (SELECT id FROM wrong_questions)
+        ''')
+        conn.commit()
+
+    return jsonify({
+        'total_questions': len(wq_ids),
+        'updated': updated,
+        'orphaned_attempts_deleted': orphaned_count,
+        'details': details
     })
 
 
