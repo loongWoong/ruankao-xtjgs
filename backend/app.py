@@ -2753,6 +2753,148 @@ def random_practice():
         questions = [_format_question(row) for row in rows]
     return jsonify({'questions': questions})
 
+@app.route('/api/practice/real-exam', methods=['GET'])
+@api_response
+def real_exam_practice():
+    """真题练习：从 real_exam_questions 随机抽题。
+    可选参数: category（按分类筛选）, limit（默认10）
+    """
+    user_id = get_user_id()
+    limit = safe_int(request.args.get('limit', 10), 10)
+    limit = max(1, min(50, limit))
+    category = request.args.get('category', '')
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        if category:
+            cursor.execute(
+                'SELECT * FROM real_exam_questions WHERE category = ? ORDER BY RANDOM() LIMIT ?',
+                (category, limit)
+            )
+        else:
+            cursor.execute(
+                'SELECT * FROM real_exam_questions ORDER BY RANDOM() LIMIT ?',
+                (limit,)
+            )
+        rows = cursor.fetchall()
+        questions = []
+        for r in rows:
+            opts = json.loads(r['options']) if r['options'] else []
+            questions.append({
+                'id': r['id'],
+                'source': 'real_exam',
+                'question': r['question_text'],
+                'options': opts,
+                'correct_answer': r['correct_answer'],
+                'analysis': r['explanation'] or '',
+                'category': r['category'] or '',
+                'chapter': r['source'] or '',
+                'year': r['year'],
+                'is_mastered': False,
+                'review_count': 0,
+                'correct_count': 0,
+                'wrong_count': 0,
+                'srs_stage': 0,
+                'next_review_time': None,
+                'last_review_time': None,
+                'created_at': r['created_at']
+            })
+    return jsonify({'questions': questions, 'total_available': len(questions)})
+
+@app.route('/api/practice/submit-real-exam', methods=['POST'])
+@api_response
+def submit_real_exam_practice():
+    """提交真题练习结果。
+    答错时自动加入错题本（wrong_questions），进入 SRS 循环。
+    请求体: { question_id, answer, user_id, time_spent? }
+    """
+    data = request.get_json(silent=True) or {}
+    question_id = data.get('question_id')
+    answer = data.get('answer')
+    user_id = data.get('user_id', 'default_user') or 'default_user'
+    time_spent = safe_int(data.get('time_spent', 0), 0)
+
+    if not question_id:
+        return jsonify({'error': 'question_id 必填'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT * FROM real_exam_questions WHERE id = ?', (question_id,))
+        rq = cursor.fetchone()
+        if not rq:
+            return jsonify({'error': '真题不存在'}), 404
+
+        is_correct = (answer == rq['correct_answer'])
+
+        # 检查是否已在错题本中（同一 user_id + 题目内容）
+        cursor.execute(
+            'SELECT id, srs_stage FROM wrong_questions WHERE user_id = ? AND question = ?',
+            (user_id, rq['question_text'])
+        )
+        existing = cursor.fetchone()
+
+        if existing:
+            # 已在错题本，走正常 SRS 更新
+            wq_id = existing['id']
+            new_stage = update_srs(cursor, wq_id, is_correct)
+            # 更新知识点认知
+            cursor.execute('SELECT kp_id FROM question_mapping WHERE question_id = ?', (wq_id,))
+            for m in cursor.fetchall():
+                update_cognition(cursor, m['kp_id'], is_correct, None, user_id)
+        elif not is_correct:
+            # 答错且不在错题本 → 新增错题
+            opts_json = rq['options'] if rq['options'] else '[]'
+            cursor.execute('''
+                INSERT INTO wrong_questions (
+                    user_id, question_id, question, options, user_answer, correct_answer,
+                    analysis, category, chapter, is_mastered, review_count, correct_count,
+                    wrong_count, srs_stage, next_review_time, source_url, created_at
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, 0, 1, 0, 1, 0, datetime('now', '+1 day'), ?, CURRENT_TIMESTAMP)
+            ''', (
+                user_id, f'rexam_{question_id}', rq['question_text'], opts_json,
+                answer, rq['correct_answer'], rq['explanation'] or '',
+                rq['category'] or '', rq['source'] or '',
+                f'real_exam:{question_id}'
+            ))
+            wq_id = cursor.lastrowid
+            new_stage = 0
+            # 关联知识点（如果 kp_id 存在）
+            if rq['kp_id']:
+                cursor.execute(
+                    'INSERT OR IGNORE INTO question_mapping (question_id, kp_id) VALUES (?, ?)',
+                    (wq_id, rq['kp_id'])
+                )
+                update_cognition(cursor, rq['kp_id'], is_correct, None, user_id)
+        else:
+            # 答对且不在错题本 → 不加入错题本，仅记录 attempt
+            wq_id = None
+            new_stage = None
+
+        # 记录练习 attempt
+        cursor.execute('''
+            INSERT INTO practice_attempts (
+                user_id, question_id, selected_answer, is_correct, error_pattern_id,
+                time_spent, first_wrong_at, completed
+            ) VALUES (?, ?, ?, ?, NULL, ?, ?, 1)
+        ''', (
+            user_id, wq_id or question_id, answer,
+            1 if is_correct else 0, time_spent,
+            rq['created_at']
+        ))
+        attempt_id = cursor.lastrowid
+        conn.commit()
+
+    return jsonify({
+        'is_correct': is_correct,
+        'correct_answer': rq['correct_answer'],
+        'attempt_id': attempt_id,
+        'added_to_wrong_questions': wq_id is not None,
+        'wrong_question_id': wq_id,
+        'srs_stage': new_stage,
+        'requires_reflection': False,
+        'next_review_days': SRS_INTERVALS[new_stage] if new_stage is not None else 0
+    })
+
 @app.route('/api/practice/today', methods=['GET'])
 @api_response
 def today_practice():

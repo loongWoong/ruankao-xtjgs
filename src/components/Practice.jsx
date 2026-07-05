@@ -4,7 +4,7 @@ import { useSearchParams } from 'react-router-dom';
 function Practice() {
   const [searchParams] = useSearchParams();
   const initialMode = searchParams.get('mode') || 'today';
-  const [mode, setMode] = useState(['today', 'recommend', 'random'].includes(initialMode) ? initialMode : 'today');
+  const [mode, setMode] = useState(['today', 'recommend', 'random', 'real-exam'].includes(initialMode) ? initialMode : 'today');
   const [userId, setUserId] = useState('');
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
@@ -64,6 +64,7 @@ function Practice() {
       let url = 'http://localhost:5002/api/practice/random?limit=10';
       if (mode === 'today') url = 'http://localhost:5002/api/practice/today?limit=10';
       if (mode === 'recommend') url = 'http://localhost:5002/api/practice/recommend';
+      if (mode === 'real-exam') url = 'http://localhost:5002/api/practice/real-exam?limit=10';
 
       const res = await fetch(url);
       const data = await res.json();
@@ -93,7 +94,11 @@ function Practice() {
     const isCorrect = selectedAnswer === question.correct_answer;
 
     try {
-      const res = await fetch('http://localhost:5002/api/practice/submit', {
+      const isRealExam = mode === 'real-exam' || question.source === 'real_exam';
+      const submitUrl = isRealExam
+        ? 'http://localhost:5002/api/practice/submit-real-exam'
+        : 'http://localhost:5002/api/practice/submit';
+      const res = await fetch(submitUrl, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
@@ -182,6 +187,7 @@ function Practice() {
           <button className={`mode-btn ${mode === 'today' ? 'active' : ''}`} onClick={() => setMode('today')}>今日待练</button>
           <button className={`mode-btn ${mode === 'recommend' ? 'active' : ''}`} onClick={() => setMode('recommend')}>🔥 击破薄弱点</button>
           <button className={`mode-btn ${mode === 'random' ? 'active' : ''}`} onClick={() => setMode('random')}>随机练习</button>
+          <button className={`mode-btn ${mode === 'real-exam' ? 'active' : ''}`} onClick={() => setMode('real-exam')}>📝 真题练习</button>
         </div>
         <div className="empty-state">
           <div className="empty-state-icon">✍️</div>
@@ -202,6 +208,7 @@ function Practice() {
         <button className={`mode-btn ${mode === 'today' ? 'active' : ''}`} onClick={() => setMode('today')}>今日待练</button>
         <button className={`mode-btn ${mode === 'recommend' ? 'active' : ''}`} onClick={() => setMode('recommend')}>🔥 击破薄弱点</button>
         <button className={`mode-btn ${mode === 'random' ? 'active' : ''}`} onClick={() => setMode('random')}>随机练习</button>
+        <button className={`mode-btn ${mode === 'real-exam' ? 'active' : ''}`} onClick={() => setMode('real-exam')}>📝 真题练习</button>
       </div>
 
       <div className="practice-progress">

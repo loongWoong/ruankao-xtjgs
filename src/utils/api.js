@@ -93,6 +93,20 @@ export const getPracticeRecommend = () => {
   return fetchAPI('/api/practice/recommend');
 };
 
+export const getPracticeRealExam = (category = '', limit = 10) => {
+  const params = new URLSearchParams({ limit });
+  if (category) params.set('category', category);
+  return fetchAPI(`/api/practice/real-exam?${params.toString()}`);
+};
+
+export const submitRealExamPractice = (data) => {
+  return fetchAPI('/api/practice/submit-real-exam', {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data)
+  });
+};
+
 export const submitPractice = (data) => {
   return fetchAPI('/api/practice/submit', {
     method: 'POST',
