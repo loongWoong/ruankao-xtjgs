@@ -130,6 +130,11 @@ function EssayTraining() {
         return;
       }
     }
+    // 提交时必须填写自评分数
+    if (status === 'submitted' && scoreValue === null) {
+      setError('提交前请填写自评分数（0-75）');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     const timeSpent = startTimeRef.current ? Math.round((Date.now() - startTimeRef.current) / 1000) : 0;
@@ -206,23 +211,23 @@ function EssayTraining() {
           {stats && (
             <div className="stats-cards">
               <div className="stat-card">
-                <div className="stat-value">{stats.total_topics}</div>
+                <div className="stat-value">{stats.total_topics || 0}</div>
                 <div className="stat-label">论文题目</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{stats.total_submissions}</div>
+                <div className="stat-value">{stats.total_submissions || 0}</div>
                 <div className="stat-label">练习次数</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{stats.submitted_count}</div>
+                <div className="stat-value">{stats.submitted_count || 0}</div>
                 <div className="stat-label">已提交</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{stats.avg_self_score}</div>
+                <div className="stat-value">{stats.avg_self_score || 0}</div>
                 <div className="stat-label">平均自评</div>
               </div>
               <div className="stat-card">
-                <div className="stat-value">{stats.total_words}</div>
+                <div className="stat-value">{stats.total_words || 0}</div>
                 <div className="stat-label">总字数</div>
               </div>
             </div>
@@ -275,7 +280,13 @@ function EssayTraining() {
       {view === 'writing' && currentTopic && (
         <div className="writing-view">
           <div className="writing-header">
-            <button className="btn btn-back" onClick={() => setView('list')}>← 返回</button>
+            <button className="btn btn-back" onClick={() => {
+              // 内容非空时提示确认，避免误点返回丢失写作内容
+              if (essayContent && essayContent.trim().length > 0) {
+                if (!window.confirm('返回将丢失未保存的内容，是否继续？')) return;
+              }
+              setView('list');
+            }}>← 返回</button>
             <h2>{currentTopic.topic_title}</h2>
             <span className="topic-year">{currentTopic.year}年 · {currentTopic.topic_category}</span>
           </div>
@@ -370,7 +381,7 @@ function EssayTraining() {
                       <div className="sub-meta">
                         <span>{sub.year}年</span>
                         <span>{sub.word_count}字</span>
-                        {sub.self_score && <span>自评 {sub.self_score}分</span>}
+                        {sub.self_score != null && <span>自评 {sub.self_score}分</span>}
                         <span className="status-tag" style={{ color: st.color, background: st.bg }}>{st.label}</span>
                       </div>
                     </div>
@@ -395,8 +406,8 @@ function EssayTraining() {
           <div className="detail-meta">
             <span>{currentSubmission.year}年</span>
             <span>{currentSubmission.word_count}字</span>
-            {currentSubmission.self_score && <span>自评 {currentSubmission.self_score}分</span>}
-            {currentSubmission.time_spent && <span>用时 {Math.round(currentSubmission.time_spent / 60)}分钟</span>}
+            {currentSubmission.self_score != null && <span>自评 {currentSubmission.self_score}分</span>}
+            {currentSubmission.time_spent != null && currentSubmission.time_spent > 0 && <span>用时 {Math.round(currentSubmission.time_spent / 60)}分钟</span>}
           </div>
           {currentSubmission.title && <h3 className="detail-title">{currentSubmission.title}</h3>}
           <pre className="detail-content">{currentSubmission.content}</pre>
