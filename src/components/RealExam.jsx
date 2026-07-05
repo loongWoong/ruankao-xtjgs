@@ -37,6 +37,10 @@ function RealExam() {
   const [answers, setAnswers] = useState({});
   const [timeLeft, setTimeLeft] = useState(0);
   const [examResult, setExamResult] = useState(null);
+  // 记录考试截止时间戳（ms），避免浏览器后台 setInterval 节流导致倒计时不准
+  const [examEndAt, setExamEndAt] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
+  const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
 
   const PAGE_SIZE = 10;
 
@@ -51,9 +55,15 @@ function RealExam() {
       handleSubmitExam();
       return;
     }
-    const timer = setInterval(() => setTimeLeft((p) => p - 1), 1000);
+    // 使用时间戳差值，避免浏览器后台/休眠时 setInterval 节流导致倒计时不准
+    const timer = setInterval(() => {
+      if (examEndAt > 0) {
+        setTimeLeft(Math.max(0, Math.floor((examEndAt - Date.now()) / 1000)));
+      }
+    }, 1000);
     return () => clearInterval(timer);
-  }, [view, timeLeft, examData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, examData, examEndAt]);
 
   const loadStats = async () => {
     try {
@@ -111,7 +121,11 @@ function RealExam() {
         const startData = await startMockExam(examId);
         setExamData(startData.exam);
       }
-      setTimeLeft((detail.exam.duration_minutes || 150) * 60);
+      const durSec = (detail.exam.duration_minutes || 150) * 60;
+      const startedAt = detail.exam.started_at ? new Date(detail.exam.started_at).getTime() : Date.now();
+      const endAt = startedAt + durSec * 1000;
+      setExamEndAt(endAt);
+      setTimeLeft(Math.max(0, Math.floor((endAt - Date.now()) / 1000)));
       setView('exam');
     } catch (e) {
       setError(e.message || '开始考试失败');
@@ -131,6 +145,9 @@ function RealExam() {
   };
 
   const handleSubmitExam = async () => {
+    if (submitting) return;
+    setSubmitting(true);
+    setShowSubmitConfirm(false);
     try {
       await submitMockExam(currentExamId);
       const result = await getMockExamResult(currentExamId);
@@ -138,8 +155,12 @@ function RealExam() {
       setView('result');
     } catch (e) {
       setError(e.message || '提交考试失败');
+    } finally {
+      setSubmitting(false);
     }
   };
+
+  const answeredCount = Object.keys(answers).length;
 
   const handleBackToList = () => {
     setView('list');
@@ -301,11 +322,27 @@ function RealExam() {
                     </div>
                   </div>
                   <div style={{ marginBottom: '0.75rem', lineHeight: 1.6 }}>{q.question_text}</div>
-                  {q.options && (
-                    <div style={{ fontSize: '0.9rem', color: '#555' }}>
-                      {typeof q.options === 'string' ? JSON.parse(q.options) : q.options}
-                    </div>
-                  )}
+                  {q.options && (() => {
+                    let opts = q.options;
+                    if (typeof opts === 'string') {
+                      try { opts = JSON.parse(opts); } catch (e) { opts = []; }
+                    }
+                    if (Array.isArray(opts)) {
+                      return (
+                        <div style={{ fontSize: '0.9rem', color: '#555' }}>
+                          {opts.map((opt, i) => <div key={i}>{opt}</div>)}
+                        </div>
+                      );
+                    }
+                    if (opts && typeof opts === 'object') {
+                      return (
+                        <div style={{ fontSize: '0.9rem', color: '#555' }}>
+                          {Object.entries(opts).map(([k, v]) => <div key={k}>{k}. {v}</div>)}
+                        </div>
+                      );
+                    }
+                    return null;
+                  })()}
                 </div>
               ))}
             </div>
@@ -384,9 +421,37 @@ function RealExam() {
           {currentIndex < examQuestions.length - 1 ? (
             <button className="btn btn-primary" onClick={() => setCurrentIndex(i => i + 1)}>下一题</button>
           ) : (
-            <button className="btn btn-primary" onClick={handleSubmitExam}>交卷</button>
+            <button
+              className="btn btn-primary"
+              onClick={() => setShowSubmitConfirm(true)}
+              disabled={submitting}
+            >
+              {submitting ? '提交中...' : '交卷'}
+            </button>
           )}
         </div>
+
+        {showSubmitConfirm && (
+          <div className="me-modal-overlay" onClick={() => setShowSubmitConfirm(false)}>
+            <div className="me-modal" onClick={(e) => e.stopPropagation()} style={{ maxWidth: '400px' }}>
+              <h3 style={{ marginBottom: '0.75rem' }}>确认交卷？</h3>
+              <p style={{ marginBottom: '0.5rem', color: '#666' }}>
+                已答 <strong style={{ color: '#667eea' }}>{answeredCount}</strong> / {examQuestions.length} 题
+              </p>
+              {answeredCount < examQuestions.length && (
+                <p style={{ marginBottom: '0.75rem', color: '#f44336', fontSize: '0.875rem' }}>
+                  ⚠️ 还有 {examQuestions.length - answeredCount} 题未作答，提交后无法修改
+                </p>
+              )}
+              <div style={{ display: 'flex', gap: '0.5rem', justifyContent: 'flex-end' }}>
+                <button className="btn btn-secondary" onClick={() => setShowSubmitConfirm(false)}>再答会</button>
+                <button className="btn btn-primary" onClick={handleSubmitExam} disabled={submitting}>
+                  {submitting ? '提交中...' : '确认交卷'}
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         <div style={{ marginTop: '1rem' }}>
           <details>

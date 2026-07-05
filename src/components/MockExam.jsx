@@ -33,6 +33,9 @@ function MockExam() {
   const [answers, setAnswers] = useState({});
   const [timeLeft, setTimeLeft] = useState(0);
   const [showSubmitConfirm, setShowSubmitConfirm] = useState(false);
+  // 记录考试截止时间戳（ms），用于 setInterval 被后台节流时仍能正确倒计时
+  const [examEndAt, setExamEndAt] = useState(0);
+  const [submitting, setSubmitting] = useState(false);
 
   const [examResult, setExamResult] = useState(null);
   const [expandedQuestions, setExpandedQuestions] = useState({});
@@ -50,12 +53,17 @@ function MockExam() {
       return;
     }
 
+    // 使用时间戳差值计算剩余时间，避免浏览器后台/休眠时 setInterval 节流导致倒计时不准
     const timer = setInterval(() => {
-      setTimeLeft((prev) => prev - 1);
+      if (examEndAt > 0) {
+        const remaining = Math.max(0, Math.floor((examEndAt - Date.now()) / 1000));
+        setTimeLeft(remaining);
+      }
     }, 1000);
 
     return () => clearInterval(timer);
-  }, [view, timeLeft, examData]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view, examData, examEndAt]);
 
   const loadStats = async () => {
     try {
@@ -116,13 +124,16 @@ function MockExam() {
       if (detail.exam.status === 'draft') {
         const startData = await startMockExam(examId);
         setExamData(startData.exam);
-        setTimeLeft((detail.exam.duration_minutes || 30) * 60);
+        const durSec = (detail.exam.duration_minutes || 30) * 60;
+        setTimeLeft(durSec);
+        setExamEndAt(Date.now() + durSec * 1000);
       } else if (detail.exam.status === 'in_progress') {
         const startTime = new Date(detail.exam.started_at).getTime();
-        const duration = (detail.exam.duration_minutes || 30) * 60 * 1000;
-        const elapsed = Math.floor((Date.now() - startTime) / 1000);
-        const remaining = Math.max(0, Math.floor(duration / 1000) - elapsed);
+        const durSec = (detail.exam.duration_minutes || 30) * 60;
+        const endAt = startTime + durSec * 1000;
+        const remaining = Math.max(0, Math.floor((endAt - Date.now()) / 1000));
         setTimeLeft(remaining);
+        setExamEndAt(endAt);
 
         const savedAnswers = {};
         (detail.questions || []).forEach((q, idx) => {
@@ -189,6 +200,8 @@ function MockExam() {
   };
 
   const handleSubmit = async () => {
+    if (submitting) return;
+    setSubmitting(true);
     setShowSubmitConfirm(false);
     try {
       await submitMockExam(currentExamId);
@@ -200,6 +213,8 @@ function MockExam() {
     } catch (e) {
       console.error('提交考试失败', e);
       alert('提交考试失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
