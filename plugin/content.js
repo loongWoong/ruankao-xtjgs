@@ -699,10 +699,7 @@ async function collectAllWrongQuestions() {
                 collectFailCount++;
             }
 
-            try {
-                sendProgressUpdate(i + 1, questionElements.length, collectedQuestions.length, collectFailCount);
-            } catch (e) {
-            }
+            // sendProgressUpdate 已删除（background 无 handler，属于死代码）
 
             try {
                 showNotification(`采集中... ${i + 1}/${questionElements.length}`, 'info');
@@ -769,20 +766,9 @@ async function collectAllWrongQuestions() {
     }
 }
 
-function sendProgressUpdate(current, total, success, fail) {
-    try {
-        chrome.runtime.sendMessage({
-            action: 'collectProgress',
-            progress: {
-                current: current,
-                total: total,
-                success: success,
-                fail: fail
-            }
-        });
-    } catch (e) {
-    }
-}
+// collectProgress 消息已删除：background.js 无对应 handler，属于死代码。
+// 若未来需要批量采集进度展示，应在 background.onMessage 添加 collectProgress 分支，
+// 并在 popup.html 增加进度条 UI。
 
 function sendToBackendViaBackgroundAsync(data) {
     return new Promise((resolve, reject) => {

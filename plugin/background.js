@@ -97,6 +97,19 @@ async function loadDedupMap() {
 
 async function saveDedupMap() {
     try {
+        // 写盘前清理过期条目，防止 dedupMap 长期积累撑爆 chrome.storage.local
+        // （每次发送成功都新增条目，但过期条目永不删除，5000 题后会占用数百 KB）
+        const now = Date.now();
+        let cleaned = 0;
+        for (const qid in dedupMap) {
+            if (now - dedupMap[qid] >= DEDUP_TTL) {
+                delete dedupMap[qid];
+                cleaned++;
+            }
+        }
+        if (cleaned > 0) {
+            console.log(`清理 ${cleaned} 条过期 dedup 条目`);
+        }
         await chrome.storage.local.set({ [DEDUP_KEY]: dedupMap });
     } catch (e) {
         console.error('保存去重映射失败:', e);
@@ -464,6 +477,8 @@ async function processPendingQueue() {
         // 避免 SW 中途死亡时已发条目仍留在队列，下次重发触发 UPSERT UPDATE 累加 wrong_count
         let successCount = 0;
         let failedCount = 0;
+        let deadLetterCount = 0;
+        const MAX_ITEM_RETRIES = 10;  // 单条最多重试 10 次，超过则视为死信移除
 
         for (const item of queue) {
             try {
@@ -479,6 +494,16 @@ async function processPendingQueue() {
                     // 立即从 storage 移除该条目（按 queue_id 精确定位，无索引漂移风险）
                     await removeFromPendingQueueById(item.queue_id);
                 } else {
+                    // 递增 retryCount，超过阈值则移除（死信），避免永久失败项无限循环
+                    item.retryCount = (item.retryCount || 0) + 1;
+                    if (item.retryCount >= MAX_ITEM_RETRIES) {
+                        console.warn(`队列项 ${item.queue_id} 重试 ${item.retryCount} 次仍失败，移除死信:`, item.data && item.data.question_id);
+                        await removeFromPendingQueueById(item.queue_id);
+                        deadLetterCount++;
+                    } else {
+                        // 更新 retryCount 到 storage
+                        await updateQueueItem(item);
+                    }
                     failedCount++;
                 }
             } catch (e) {
@@ -488,7 +513,7 @@ async function processPendingQueue() {
         }
 
         if (successCount > 0 || failedCount > 0) {
-            console.log(`待发送队列处理完成：成功 ${successCount} 条，失败 ${failedCount} 条保留队列`);
+            console.log(`待发送队列处理完成：成功 ${successCount} 条，失败 ${failedCount} 条保留队列，死信 ${deadLetterCount} 条`);
         }
     } finally {
         isProcessingQueue = false;
@@ -507,6 +532,21 @@ async function removeFromPendingQueueById(queueId) {
         await chrome.storage.local.set({ [PENDING_QUEUE_KEY]: queue });
     } catch (e) {
         console.error('移除队列条目失败:', e);
+    }
+}
+
+// 更新队列条目的 retryCount（原子操作）
+async function updateQueueItem(item) {
+    if (!item || !item.queue_id) return;
+    try {
+        const result = await chrome.storage.local.get(PENDING_QUEUE_KEY);
+        const queue = result[PENDING_QUEUE_KEY] || [];
+        const idx = queue.findIndex(x => x.queue_id === item.queue_id);
+        if (idx < 0) return;
+        queue[idx].retryCount = item.retryCount;
+        await chrome.storage.local.set({ [PENDING_QUEUE_KEY]: queue });
+    } catch (e) {
+        console.error('更新队列条目失败:', e);
     }
 }
 
