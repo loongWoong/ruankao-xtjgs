@@ -57,14 +57,24 @@ function CaseAnalysis() {
     loadData();
   }, []);
 
+  // 搜索防抖：filters.search 变化 300ms 后才查询
+  const filterTimer = useRef(null);
+  useEffect(() => {
+    if (filterTimer.current) clearTimeout(filterTimer.current);
+    filterTimer.current = setTimeout(() => {
+      getCaseQuestions(filters).then(data => {
+        setQuestions(data.items || []);
+        setCategories(data.categories || []);
+        setYears(data.years || []);
+      }).catch(() => {});
+    }, 300);
+    return () => {
+      if (filterTimer.current) clearTimeout(filterTimer.current);
+    };
+  }, [filters]);
+
   const handleFilter = (key, value) => {
-    const newFilters = { ...filters, [key]: value };
-    setFilters(newFilters);
-    getCaseQuestions(newFilters).then(data => {
-      setQuestions(data.items || []);
-      setCategories(data.categories || []);
-      setYears(data.years || []);
-    }).catch(() => {});
+    setFilters(prev => ({ ...prev, [key]: value }));
   };
 
   const startAnswering = async (caseId) => {

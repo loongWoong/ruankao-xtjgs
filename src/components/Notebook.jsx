@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import {
   createNote,
   getNotes,
@@ -63,6 +63,8 @@ const NoteTab = () => {
   const [notes, setNotes] = useState([]);
   const [selectedNote, setSelectedNote] = useState(null);
   const [search, setSearch] = useState('');
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const searchTimer = useRef(null);
   const [noteType, setNoteType] = useState('');
   const [loading, setLoading] = useState(false);
   const [title, setTitle] = useState('');
@@ -77,7 +79,7 @@ const NoteTab = () => {
     try {
       const params = {};
       if (noteType) params.note_type = noteType;
-      if (search) params.search = search;
+      if (debouncedSearch) params.search = debouncedSearch;
       const data = await getNotes(params);
       setNotes(data.items || []);
     } catch (err) {
@@ -87,9 +89,20 @@ const NoteTab = () => {
     setLoading(false);
   };
 
+  // 搜索防抖：300ms 后才触发请求
+  useEffect(() => {
+    if (searchTimer.current) clearTimeout(searchTimer.current);
+    searchTimer.current = setTimeout(() => {
+      setDebouncedSearch(search);
+    }, 300);
+    return () => {
+      if (searchTimer.current) clearTimeout(searchTimer.current);
+    };
+  }, [search]);
+
   useEffect(() => {
     fetchNotes();
-  }, [noteType, search]);
+  }, [noteType, debouncedSearch]);
 
   const handleSelectNote = async (note) => {
     setSelectedNote(note);
@@ -156,15 +169,19 @@ const NoteTab = () => {
     }
   };
 
-  const toggleFavorite = async () => {
-    if (!selectedNote) return;
+  const toggleFavorite = async (noteId, currentFavorite) => {
+    const targetId = noteId || selectedNote?.id;
+    if (!targetId) return;
     try {
-      if (isFavorite) {
-        await removeFavorite('note', selectedNote.id);
+      if (currentFavorite) {
+        await removeFavorite('note', targetId);
       } else {
-        await addFavorite('note', selectedNote.id);
+        await addFavorite('note', targetId);
       }
-      setIsFavorite(!isFavorite);
+      // 同步更新 selectedNote 状态
+      if (selectedNote?.id === targetId) {
+        setIsFavorite(!currentFavorite);
+      }
       fetchNotes();
     } catch (err) {
       console.error('切换收藏失败:', err);
@@ -220,12 +237,13 @@ const NoteTab = () => {
                   <span className="nb-note-title">{note.title || '无标题'}</span>
                   <span className="nb-favorite-star" onClick={(e) => {
                     e.stopPropagation();
+                    toggleFavorite(note.id, note.is_favorite);
                   }}>
                     {note.is_favorite ? '⭐' : '☆'}
                   </span>
                 </div>
                 <p className="nb-note-summary">
-                  {note.content ? note.content.substring(0, 80) + '...' : '暂无内容'}
+                  {note.content ? (note.content.length > 80 ? note.content.substring(0, 80) + '...' : note.content) : '暂无内容'}
                 </p>
                 <div className="nb-note-meta">
                   <div className="nb-note-tags">
@@ -271,7 +289,7 @@ const NoteTab = () => {
               <div className="nb-editor-actions">
                 <button
                   className="nb-favorite-btn"
-                  onClick={toggleFavorite}
+                  onClick={() => toggleFavorite(selectedNote?.id, isFavorite)}
                   title={isFavorite ? '取消收藏' : '收藏'}
                 >
                   {isFavorite ? '⭐' : '☆'}
