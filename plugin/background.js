@@ -120,6 +120,15 @@ function markSent(questionId) {
     saveDedupMap();
 }
 
+// 批量场景：只更新内存，调用方负责在循环结束后调用 saveDedupMap() 一次写盘
+function markSentBatch(questionIds) {
+    if (!Array.isArray(questionIds) || questionIds.length === 0) return;
+    const now = Date.now();
+    for (const qid of questionIds) {
+        if (qid) dedupMap[qid] = now;
+    }
+}
+
 function unmarkSent(questionId) {
     // 发送失败时清除标记，允许立即重试
     if (!questionId) return;
@@ -129,11 +138,37 @@ function unmarkSent(questionId) {
     }
 }
 
+const PENDING_QUEUE_LIMIT = 500;  // 防止后端长时间离线时无限堆积撑爆 chrome.storage.local 配额
+
 async function addToPendingQueue(data, type) {
     try {
         const result = await chrome.storage.local.get(PENDING_QUEUE_KEY);
-        const queue = result[PENDING_QUEUE_KEY] || [];
-        // 为每条分配唯一 queue_id，便于逐条原子删除（避免索引漂移）
+        let queue = result[PENDING_QUEUE_KEY] || [];
+
+        // 去重：同 question_id 已在队列则更新 timestamp，不重复插入
+        // （session 无 question_id，按 paper_name + submitted_at 去重）
+        const dedupKey = type === 'session'
+            ? 'session_' + (data.paper_name || '') + '_' + (data.submitted_at || '')
+            : (data && data.question_id);
+        if (dedupKey) {
+            const existIdx = queue.findIndex(x => {
+                if (type === 'session') return x.type === 'session' && 'session_' + (x.data.paper_name || '') + '_' + (x.data.submitted_at || '') === dedupKey;
+                return x.type !== 'session' && x.data && x.data.question_id === dedupKey;
+            });
+            if (existIdx >= 0) {
+                queue[existIdx].timestamp = Date.now();
+                queue[existIdx].retryCount = 0;
+                await chrome.storage.local.set({ [PENDING_QUEUE_KEY]: queue });
+                return true;
+            }
+        }
+
+        // 上限保护：超限时丢弃最旧条目并告警
+        if (queue.length >= PENDING_QUEUE_LIMIT) {
+            console.warn(`待发送队列已达上限 ${PENDING_QUEUE_LIMIT}，丢弃最旧条目`);
+            queue.shift();
+        }
+
         queue.push({
             queue_id: Date.now().toString(36) + '_' + Math.random().toString(36).slice(2, 8),
             type: type || 'question',
@@ -214,12 +249,16 @@ async function sendToBackend(data, skipDedup = false, skipQueueOnFail = false) {
     unmarkSent(data.question_id);
 
     // processPendingQueue 调用时 skipQueueOnFail=true，避免重复入队
+    let actuallyQueued = false;
     if (!skipQueueOnFail) {
         console.error('所有重试都失败，加入离线队列');
-        await addToPendingQueue(data);
+        actuallyQueued = await addToPendingQueue(data, 'question');
+        if (!actuallyQueued) {
+            console.error('加入离线队列也失败，数据可能丢失');
+        }
     }
 
-    return { success: false, error: lastError ? lastError.message : '未知错误', queued: !skipQueueOnFail };
+    return { success: false, error: lastError ? lastError.message : '未知错误', queued: actuallyQueued };
 }
 
 async function sendBatchToBackend(items) {
@@ -275,12 +314,9 @@ async function sendBatchToBackend(items) {
                     totalUpdated += result.updated || 0;
                     totalFailed += result.failed || 0;
                     success = true;
-                    // 批量发送成功后，逐个标记 question_id 已发送
-                    for (const item of chunk) {
-                        if (item && item.question_id) {
-                            markSent(item.question_id);
-                        }
-                    }
+                    // 批量发送成功后，标记 question_id 已发送（只更新内存，循环外统一写盘一次）
+                    const sentIds = chunk.map(item => item && item.question_id).filter(Boolean);
+                    markSentBatch(sentIds);
                     break;
                 }
 
@@ -303,6 +339,9 @@ async function sendBatchToBackend(items) {
             totalQueued += chunk.length;
         }
     }
+
+    // 批量场景只写一次 dedupMap，避免 200 条触发 200 次 chrome.storage.local.set
+    await saveDedupMap();
 
     return {
         success: totalFailed === 0 && totalQueued === 0,
