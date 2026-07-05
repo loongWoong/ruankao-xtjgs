@@ -447,11 +447,11 @@ function Dashboard() {
                 >
                   <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{kp.name}</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                    <span>掌握度: {Math.round(kp.score * 100)}%</span>
-                    <span>稳定性: {kp.stability.toFixed(1)}</span>
+                    <span>掌握度: {Math.round((kp.score || 0) * 100)}%</span>
+                    <span>稳定性: {(kp.stability ?? 0).toFixed(1)}</span>
                   </div>
                   <div className="category-bar" style={{ height: '4px', background: '#eee', marginTop: '0.5rem' }}>
-                    <div className="category-bar-fill" style={{ width: `${kp.score * 100}%`, background: '#4caf50', height: '100%' }} />
+                    <div className="category-bar-fill" style={{ width: `${(kp.score || 0) * 100}%`, background: '#4caf50', height: '100%' }} />
                   </div>
                 </div>
               ))
