@@ -2354,14 +2354,16 @@ def add_practice_session():
     with get_db_conn() as conn:
         cursor = conn.cursor()
 
-        # UPSERT 去重：同一 user_id + source_url 在 1 小时内的记录视为重复，
-        # 更新而非新增（submitted_at 是客户端毫秒级时间戳，作为唯一键不可靠）
+        # UPSERT 去重：同一 user_id + source_url 在 5 分钟内的记录视为重复点击，
+        # 更新而非新增。窗口从 1 小时缩短到 5 分钟：1 小时窗口会覆盖用户重做同一
+        # 试卷的合法场景（上午 60 分，下午 85 分），导致进步轨迹丢失。
+        # 5 分钟足以防重复点击，不会覆盖重做。
         existing_id = None
         if clean_source_url:
             cursor.execute('''
                 SELECT id FROM practice_sessions
                 WHERE user_id = ? AND source_url = ?
-                  AND created_at >= datetime('now', '-1 hour')
+                  AND created_at >= datetime('now', '-5 minutes')
                 ORDER BY created_at DESC LIMIT 1
             ''', (clean_user_id, clean_source_url))
             row = cursor.fetchone()

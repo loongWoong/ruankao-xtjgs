@@ -10,7 +10,7 @@ const MAX_RETRIES = 3;
 const ALARM_NAME = 'retry_pending_queue';
 const ALARM_INTERVAL = 0.5;
 const BATCH_CHUNK_SIZE = 200;
-const SESSION_HISTORY_LIMIT = 20;
+const SESSION_HISTORY_LIMIT = 50;  // 提升上限：旧值 20 在用户一天多套练习时易丢失早期记录
 
 // 读取 popup 配置的 user_id（缓存，避免每次发送都读 storage）
 let cachedUserId = '';
@@ -526,8 +526,10 @@ chrome.commands.onCommand.addListener(function(command) {
 
             const tab = tabs[0];
 
-            if (!tab.url || !tab.url.includes('ruankaodaren.com/exam')) {
-                console.log('当前页面不是软考达人考试页面');
+            // 与 content.js SPA 导航处理器保持一致：识别 exam/practice/test/paper/mock 等所有练习页路径
+            // 旧逻辑只认 /exam，导致 /practice /paper /mock 页面快捷键静默失效，但右键菜单却能采集（不一致）
+            if (!tab.url || !/ruankaodaren\.com\/(exam|practice|test|paper|mock)/i.test(tab.url)) {
+                console.log('当前页面不是软考达人练习页面');
                 return;
             }
 

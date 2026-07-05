@@ -410,7 +410,7 @@ function renderSessionHistory(items) {
         return;
     }
 
-    const html = items.slice(0, 10).map(function(item) {
+    const html = items.slice(0, 20).map(function(item) {
         const name = (item.paper_name || '未命名练习').substring(0, 20);
         const scoreText = item.score > 0 ? item.score + '分' : Math.round((item.accuracy || 0) * 100) + '%';
         const correctText = item.total_questions > 0 ? (item.correct_count + '/' + item.total_questions) : '';
