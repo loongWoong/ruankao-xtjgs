@@ -93,14 +93,29 @@ async function saveDedupMap() {
 }
 
 function isDuplicate(questionId) {
+    // 只读检查：仅判断是否在去重窗口内，不写入 dedupMap
     if (!questionId) return false;
     const now = Date.now();
     if (dedupMap[questionId] && (now - dedupMap[questionId]) < DEDUP_TTL) {
         return true;
     }
-    dedupMap[questionId] = now;
-    saveDedupMap();
     return false;
+}
+
+function markSent(questionId) {
+    // 发送成功后才标记，避免失败时污染 dedupMap 导致 5 分钟内无法重采
+    if (!questionId) return;
+    dedupMap[questionId] = Date.now();
+    saveDedupMap();
+}
+
+function unmarkSent(questionId) {
+    // 发送失败时清除标记，允许立即重试
+    if (!questionId) return;
+    if (dedupMap[questionId]) {
+        delete dedupMap[questionId];
+        saveDedupMap();
+    }
 }
 
 async function addToPendingQueue(data) {
@@ -139,7 +154,7 @@ async function setPendingQueue(queue) {
     }
 }
 
-async function sendToBackend(data, skipDedup = false) {
+async function sendToBackend(data, skipDedup = false, skipQueueOnFail = false) {
     if (!skipDedup && data.question_id && isDuplicate(data.question_id)) {
         console.log('题目重复，跳过发送:', data.question_id);
         return { success: true, skipped: true, reason: 'duplicate' };
@@ -163,6 +178,8 @@ async function sendToBackend(data, skipDedup = false) {
             if (response.ok) {
                 const result = await response.json();
                 console.log('发送到后端成功:', result);
+                // 发送成功后才标记去重，避免失败时污染 dedupMap
+                markSent(data.question_id);
                 return { success: true, data: result };
             }
 
@@ -179,10 +196,16 @@ async function sendToBackend(data, skipDedup = false) {
         }
     }
 
-    console.error('所有重试都失败，加入离线队列');
-    await addToPendingQueue(data);
+    // 失败时清除去重标记（若曾标记），允许立即重试
+    unmarkSent(data.question_id);
 
-    return { success: false, error: lastError ? lastError.message : '未知错误', queued: true };
+    // processPendingQueue 调用时 skipQueueOnFail=true，避免重复入队
+    if (!skipQueueOnFail) {
+        console.error('所有重试都失败，加入离线队列');
+        await addToPendingQueue(data);
+    }
+
+    return { success: false, error: lastError ? lastError.message : '未知错误', queued: !skipQueueOnFail };
 }
 
 async function sendBatchToBackend(items) {
@@ -238,6 +261,12 @@ async function sendBatchToBackend(items) {
                     totalUpdated += result.updated || 0;
                     totalFailed += result.failed || 0;
                     success = true;
+                    // 批量发送成功后，逐个标记 question_id 已发送
+                    for (const item of chunk) {
+                        if (item && item.question_id) {
+                            markSent(item.question_id);
+                        }
+                    }
                     break;
                 }
 
@@ -253,7 +282,7 @@ async function sendBatchToBackend(items) {
         }
 
         if (!success) {
-            // 批量发送失败，整块加入离线队列（逐条加入，复用单条队列处理）
+            // 批量发送失败：整块加入离线队列，且不清除 dedupMap（这些 qid 本就未标记）
             for (const item of chunk) {
                 await addToPendingQueue(item);
             }
@@ -371,7 +400,8 @@ async function processPendingQueue() {
                     remaining.push(item);
                 }
             } else {
-                result = await sendToBackend(item.data, true);
+                // skipQueueOnFail=true：失败时由 remaining 处理，不再重复入队
+                result = await sendToBackend(item.data, true, true);
                 if (result.success) {
                     successCount++;
                 } else {
