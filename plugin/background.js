@@ -369,7 +369,8 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         });
         return true;
     } else if (request.action === 'checkBackendStatus') {
-        fetch(API_URL.replace('/wrong-questions', '/stats/overview'), {
+        // 使用轻量级 /api/health 接口检测后端存活，避免拉取重量级 stats/overview
+        fetch(API_URL.replace('/wrong-questions', '/health'), {
             method: 'GET',
             headers: { 'Content-Type': 'application/json' }
         })
@@ -378,6 +379,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         })
         .catch(() => {
             sendResponse({ online: false });
+        });
+        return true;
+    } else if (request.action === 'loadStats') {
+        // popup 通过 background 中转拉取统计，避免 popup 直接跨域请求
+        fetch(API_URL.replace('/wrong-questions', '/stats/overview'), {
+            method: 'GET',
+            headers: { 'Content-Type': 'application/json' }
+        })
+        .then(response => response.json())
+        .then(data => {
+            sendResponse({ success: true, data: data });
+        })
+        .catch(error => {
+            sendResponse({ success: false, error: error.message });
         });
         return true;
     }

@@ -21,7 +21,10 @@
   },
   "content_scripts": [
     {
-      "matches": ["https://*.ruankaodaren.com/exam/*", "https://*.ruankaodaren.com/exam", "https://ruankaodaren.com/exam/*", "https://ruankaodaren.com/exam"],
+      "matches": [
+        "https://*.ruankaodaren.com/*",
+        "https://ruankaodaren.com/*"
+      ],
       "js": ["content.js"],
       "run_at": "document_end"
     }

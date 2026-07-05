@@ -1,5 +1,3 @@
-const API_BASE = 'http://localhost:5002';
-
 document.addEventListener('DOMContentLoaded', function() {
     loadStats();
     checkBackendStatus();
@@ -12,24 +10,32 @@ document.addEventListener('DOMContentLoaded', function() {
 
 function loadStats() {
     try {
-        fetch(`${API_BASE}/api/stats/overview`)
-            .then(res => res.json())
-            .then(data => {
-                if (data) {
-                    document.getElementById('statTotal').textContent = data.total_wrong_questions || data.total_questions || 0;
-                    document.getElementById('statMastered').textContent = data.total_mastered || data.mastered_count || 0;
-                    document.getElementById('statToday').textContent = data.today_practiced || 0;
-                }
-            })
-            .catch(err => {
-                console.log('加载统计失败:', err);
-                document.getElementById('statTotal').textContent = '0';
-                document.getElementById('statMastered').textContent = '0';
-                document.getElementById('statToday').textContent = '0';
-            });
+        // 通过 background 中转拉取统计，避免 popup 直接跨域请求导致 CORS 问题
+        chrome.runtime.sendMessage({ action: 'loadStats' }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.log('加载统计失败:', chrome.runtime.lastError);
+                setStatsEmpty();
+                return;
+            }
+            if (response && response.success && response.data) {
+                const data = response.data;
+                document.getElementById('statTotal').textContent = data.total_wrong_questions || data.total_questions || 0;
+                document.getElementById('statMastered').textContent = data.total_mastered || data.mastered_count || 0;
+                document.getElementById('statToday').textContent = data.today_practiced || 0;
+            } else {
+                setStatsEmpty();
+            }
+        });
     } catch (e) {
         console.log('统计加载异常:', e);
+        setStatsEmpty();
     }
+}
+
+function setStatsEmpty() {
+    document.getElementById('statTotal').textContent = '0';
+    document.getElementById('statMastered').textContent = '0';
+    document.getElementById('statToday').textContent = '0';
 }
 
 function checkBackendStatus() {
