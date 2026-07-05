@@ -542,9 +542,9 @@ async function collectAllWrongQuestions() {
 
         console.log(`找到 ${questionElements.length} 道题目`);
 
+        // 阶段一：逐题采集 DOM 数据（不发网络请求，提升批量效率）
         const collectedQuestions = [];
-        let successCount = 0;
-        let failCount = 0;
+        let collectFailCount = 0;
 
         for (let i = 0; i < questionElements.length; i++) {
             const questionEl = questionElements[i];
@@ -552,19 +552,12 @@ async function collectAllWrongQuestions() {
 
             if (questionData) {
                 collectedQuestions.push(questionData);
-                try {
-                    await sendToBackendViaBackgroundAsync(questionData);
-                    successCount++;
-                } catch (e) {
-                    failCount++;
-                    console.error(`第 ${i + 1} 题发送失败:`, e);
-                }
             } else {
-                failCount++;
+                collectFailCount++;
             }
 
             try {
-                sendProgressUpdate(i + 1, questionElements.length, successCount, failCount);
+                sendProgressUpdate(i + 1, questionElements.length, collectedQuestions.length, collectFailCount);
             } catch (e) {
             }
 
@@ -574,7 +567,32 @@ async function collectAllWrongQuestions() {
             }
         }
 
-        const resultMsg = `采集完成：成功 ${successCount} 道，失败 ${failCount} 道`;
+        // 阶段二：批量发送到后端（一次请求，单连接提交）
+        let successCount = 0;
+        let failCount = collectFailCount;
+        let batchResult = null;
+
+        if (collectedQuestions.length > 0) {
+            try {
+                showNotification(`正在批量发送 ${collectedQuestions.length} 道题目...`, 'info');
+                batchResult = await sendBatchToBackendViaBackgroundAsync(collectedQuestions);
+                // inserted + updated 均视为发送成功
+                successCount = (batchResult.inserted || 0) + (batchResult.updated || 0);
+                failCount += batchResult.failed || 0;
+                if (batchResult.queued > 0) {
+                    try {
+                        showNotification(`${batchResult.queued} 道已加入离线队列`, 'info');
+                    } catch (e) {
+                    }
+                }
+            } catch (e) {
+                console.error('批量发送失败:', e);
+                failCount += collectedQuestions.length;
+            }
+        }
+
+        const resultMsg = `采集完成：成功 ${successCount} 道，失败 ${failCount} 道` +
+            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued} 道` : '');
         console.log(resultMsg);
         try {
             showNotification(resultMsg, successCount > 0 ? 'success' : 'error');
@@ -586,6 +604,9 @@ async function collectAllWrongQuestions() {
             total: questionElements.length,
             successCount: successCount,
             failCount: failCount,
+            inserted: batchResult ? batchResult.inserted : 0,
+            updated: batchResult ? batchResult.updated : 0,
+            queued: batchResult ? batchResult.queued : 0,
             data: collectedQuestions
         };
     } catch (error) {
@@ -624,6 +645,30 @@ function sendToBackendViaBackgroundAsync(data) {
                     resolve(response);
                 } else {
                     reject(new Error(response ? response.error : '未知错误'));
+                }
+            });
+        } catch (e) {
+            reject(e);
+        }
+    });
+}
+
+function sendBatchToBackendViaBackgroundAsync(items) {
+    return new Promise((resolve, reject) => {
+        try {
+            chrome.runtime.sendMessage({
+                action: 'sendBatchToBackend',
+                items: items
+            }, function(response) {
+                if (chrome.runtime.lastError) {
+                    reject(new Error(chrome.runtime.lastError.message));
+                    return;
+                }
+                // 批量接口即使部分失败也返回 success（已尽力发送，失败入队）
+                if (response) {
+                    resolve(response);
+                } else {
+                    reject(new Error('批量发送无响应'));
                 }
             });
         } catch (e) {

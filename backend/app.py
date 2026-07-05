@@ -2092,11 +2092,11 @@ def health_check():
         'timestamp': datetime.now().isoformat()
     })
 
-@app.route('/api/wrong-questions', methods=['POST'])
-@api_response
-def add_wrong_question():
-    data = request.get_json() or {}
-
+def _upsert_wrong_question_record(cursor, data, user_id=None):
+    """Upsert 一条错题记录（供单条与批量接口复用）。
+    基于 question_id + user_id 去重：已存在则累加 wrong_count/error_count 并更新 user_answer；
+    不存在则插入并初始化 SRS。返回 (q_id, is_new)，question 为空时返回 (None, False)。
+    """
     clean_question = sanitize_string(data.get('question', ''), 5000)
     clean_user_answer = sanitize_string(data.get('user_answer', ''), 200)
     clean_correct_answer = sanitize_string(data.get('correct_answer', ''), 200)
@@ -2105,7 +2105,7 @@ def add_wrong_question():
     clean_chapter = sanitize_string(data.get('chapter', ''), 200)
     clean_source_url = sanitize_string(data.get('source_url', ''), 1000)
     clean_question_id = sanitize_string(data.get('question_id', ''), 100)
-    clean_user_id = sanitize_string(data.get('user_id', 'default_user'), 100) or 'default_user'
+    clean_user_id = sanitize_string(user_id or data.get('user_id', 'default_user'), 100) or 'default_user'
 
     raw_options = data.get('options', [])
     if isinstance(raw_options, list):
@@ -2114,83 +2114,142 @@ def add_wrong_question():
         clean_options = []
 
     if not clean_question:
-        return jsonify({'error': 'Question content is required'}), 400
+        return None, False
+
+    # UPSERT 去重：基于 question_id + user_id 检查是否已存在
+    existing_id = None
+    if clean_question_id:
+        cursor.execute(
+            'SELECT id FROM wrong_questions WHERE question_id = ? AND user_id = ?',
+            (clean_question_id, clean_user_id)
+        )
+        row = cursor.fetchone()
+        if row:
+            existing_id = row[0]
+
+    if existing_id:
+        # 已存在：更新作答记录和错误次数，不覆盖 correct_answer/options
+        cursor.execute('''
+            UPDATE wrong_questions
+            SET user_answer = ?,
+                wrong_count = wrong_count + 1,
+                error_count = error_count + 1,
+                last_error_at = CURRENT_TIMESTAMP,
+                source_url = COALESCE(NULLIF(?, ''), source_url)
+            WHERE id = ?
+        ''', (clean_user_answer, clean_source_url, existing_id))
+        q_id = existing_id
+        is_new = False
+    else:
+        cursor.execute('''
+            INSERT INTO wrong_questions (
+                question_id, question, options, user_answer, correct_answer,
+                analysis, category, chapter, source_url, user_id
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            clean_question_id,
+            clean_question,
+            json.dumps(clean_options),
+            clean_user_answer,
+            clean_correct_answer,
+            clean_analysis,
+            clean_category,
+            clean_chapter,
+            clean_source_url,
+            clean_user_id
+        ))
+        q_id = cursor.lastrowid
+        is_new = True
+
+        cursor.execute('''
+            UPDATE wrong_questions
+            SET next_review_time = datetime('now', ?),
+                wrong_count = 1
+            WHERE id = ?
+        ''', (f'+{SRS_INTERVALS[0]} day', q_id,))
+
+    kps = data.get('knowledge_points', [])
+    if not kps:
+        kp_name = clean_chapter or clean_category or 'General'
+        kps = [kp_name]
+
+    for kp_name in kps:
+        clean_kp = sanitize_string(kp_name, 200)
+        if clean_kp:
+            kp_id = get_or_create_kp(cursor, clean_kp, clean_category, clean_chapter)
+            # 仅新题才建立映射，避免重复 mapping
+            if is_new:
+                cursor.execute('INSERT OR IGNORE INTO question_mapping (question_id, kp_id) VALUES (?, ?)', (q_id, kp_id))
+            cursor.execute('''
+                INSERT OR IGNORE INTO user_cognition (kp_id, user_id, mastery_score, stability, last_visit)
+                VALUES (?, ?, 0.3, 0.5, CURRENT_TIMESTAMP)
+            ''', (kp_id, clean_user_id))
+
+    return q_id, is_new
+
+@app.route('/api/wrong-questions', methods=['POST'])
+@api_response
+def add_wrong_question():
+    data = request.get_json() or {}
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        q_id, is_new = _upsert_wrong_question_record(cursor, data)
+        if q_id is None:
+            return jsonify({'error': 'Question content is required'}), 400
+        conn.commit()
+    return jsonify({'success': True, 'id': q_id, 'is_new': is_new})
+
+@app.route('/api/wrong-questions/batch', methods=['POST'])
+@api_response
+def batch_add_wrong_questions():
+    """批量采集错题入库。请求体: {"questions": [...], "user_id": "default_user"}
+    每条记录走 UPSERT 去重，单次最多 200 条，单连接一次性提交以提升性能。
+    """
+    data = request.get_json() or {}
+    questions = data.get('questions', [])
+    if not isinstance(questions, list):
+        return jsonify({'error': 'questions must be a list'}), 400
+    if len(questions) == 0:
+        return jsonify({'error': 'No questions provided'}), 400
+    if len(questions) > 200:
+        return jsonify({'error': 'questions length must be <= 200'}), 400
+
+    user_id = sanitize_string(data.get('user_id', 'default_user'), 100) or 'default_user'
+
+    inserted = 0
+    updated = 0
+    failed = 0
+    errors = []
 
     with get_db_conn() as conn:
         cursor = conn.cursor()
-
-        # UPSERT 去重：基于 question_id + user_id 检查是否已存在
-        # 已存在则更新 user_answer/wrong_count/last_error_at，不重复插入
-        existing_id = None
-        if clean_question_id:
-            cursor.execute(
-                'SELECT id FROM wrong_questions WHERE question_id = ? AND user_id = ?',
-                (clean_question_id, clean_user_id)
-            )
-            row = cursor.fetchone()
-            if row:
-                existing_id = row[0]
-
-        if existing_id:
-            # 已存在：更新作答记录和错误次数，不覆盖 correct_answer/options
-            cursor.execute('''
-                UPDATE wrong_questions
-                SET user_answer = ?,
-                    wrong_count = wrong_count + 1,
-                    error_count = error_count + 1,
-                    last_error_at = CURRENT_TIMESTAMP,
-                    source_url = COALESCE(NULLIF(?, ''), source_url)
-                WHERE id = ?
-            ''', (clean_user_answer, clean_source_url, existing_id))
-            q_id = existing_id
-            is_new = False
-        else:
-            cursor.execute('''
-                INSERT INTO wrong_questions (
-                    question_id, question, options, user_answer, correct_answer,
-                    analysis, category, chapter, source_url, user_id
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ''', (
-                clean_question_id,
-                clean_question,
-                json.dumps(clean_options),
-                clean_user_answer,
-                clean_correct_answer,
-                clean_analysis,
-                clean_category,
-                clean_chapter,
-                clean_source_url,
-                clean_user_id
-            ))
-            q_id = cursor.lastrowid
-            is_new = True
-
-            cursor.execute('''
-                UPDATE wrong_questions
-                SET next_review_time = datetime('now', ?),
-                    wrong_count = 1
-                WHERE id = ?
-            ''', (f'+{SRS_INTERVALS[0]} day', q_id,))
-
-        kps = data.get('knowledge_points', [])
-        if not kps:
-            kp_name = clean_chapter or clean_category or 'General'
-            kps = [kp_name]
-
-        for kp_name in kps:
-            clean_kp = sanitize_string(kp_name, 200)
-            if clean_kp:
-                kp_id = get_or_create_kp(cursor, clean_kp, clean_category, clean_chapter)
-                # 仅新题才建立映射，避免重复 mapping
+        for idx, q_data in enumerate(questions):
+            if not isinstance(q_data, dict):
+                failed += 1
+                continue
+            try:
+                q_id, is_new = _upsert_wrong_question_record(cursor, q_data, user_id)
+                if q_id is None:
+                    failed += 1
+                    continue
                 if is_new:
-                    cursor.execute('INSERT OR IGNORE INTO question_mapping (question_id, kp_id) VALUES (?, ?)', (q_id, kp_id))
-                cursor.execute('''
-                    INSERT OR IGNORE INTO user_cognition (kp_id, user_id, mastery_score, stability, last_visit)
-                    VALUES (?, ?, 0.3, 0.5, CURRENT_TIMESTAMP)
-                ''', (kp_id, clean_user_id))
-
+                    inserted += 1
+                else:
+                    updated += 1
+            except Exception as e:
+                failed += 1
+                if len(errors) < 20:
+                    errors.append({'index': idx, 'error': str(e)})
         conn.commit()
-    return jsonify({'success': True, 'id': q_id, 'is_new': is_new})
+
+    return jsonify({
+        'success': True,
+        'total': len(questions),
+        'inserted': inserted,
+        'updated': updated,
+        'failed': failed,
+        'errors': errors
+    })
 
 @app.route('/api/wrong-questions', methods=['GET'])
 @api_response

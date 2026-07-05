@@ -1,10 +1,12 @@
 const API_URL = 'http://localhost:5002/api/wrong-questions';
+const BATCH_API_URL = 'http://localhost:5002/api/wrong-questions/batch';
 const PENDING_QUEUE_KEY = 'pending_queue';
 const DEDUP_KEY = 'dedup_map';
 const DEDUP_TTL = 5 * 60 * 1000;
 const MAX_RETRIES = 3;
 const ALARM_NAME = 'retry_pending_queue';
 const ALARM_INTERVAL = 0.5;
+const BATCH_CHUNK_SIZE = 200;
 
 let dedupMap = {};
 
@@ -143,6 +145,93 @@ async function sendToBackend(data, skipDedup = false) {
     return { success: false, error: lastError ? lastError.message : '未知错误', queued: true };
 }
 
+async function sendBatchToBackend(items) {
+    // 批量发送错题到后端。先做去重（基于 question_id），再分块（每块 <= BATCH_CHUNK_SIZE）发送。
+    // 返回 { success, total, inserted, updated, failed, queued }
+    if (!Array.isArray(items) || items.length === 0) {
+        return { success: true, total: 0, inserted: 0, updated: 0, failed: 0, queued: 0 };
+    }
+
+    // 去重：同一批次内相同 question_id 只发一次；同时检查 5 分钟内已发过的
+    const uniqueItems = [];
+    const seenIds = new Set();
+    for (const item of items) {
+        const qid = item && item.question_id;
+        if (qid && seenIds.has(qid)) {
+            continue;
+        }
+        if (qid && isDuplicate(qid)) {
+            continue;
+        }
+        if (qid) {
+            seenIds.add(qid);
+        }
+        uniqueItems.push(item);
+    }
+
+    if (uniqueItems.length === 0) {
+        return { success: true, total: items.length, inserted: 0, updated: 0, failed: 0, queued: 0, skipped: items.length };
+    }
+
+    let totalInserted = 0;
+    let totalUpdated = 0;
+    let totalFailed = 0;
+    let totalQueued = 0;
+
+    // 分块发送
+    for (let i = 0; i < uniqueItems.length; i += BATCH_CHUNK_SIZE) {
+        const chunk = uniqueItems.slice(i, i + BATCH_CHUNK_SIZE);
+        let lastError = null;
+        let success = false;
+
+        for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+            try {
+                const response = await fetch(BATCH_API_URL, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ questions: chunk })
+                });
+
+                if (response.ok) {
+                    const result = await response.json();
+                    totalInserted += result.inserted || 0;
+                    totalUpdated += result.updated || 0;
+                    totalFailed += result.failed || 0;
+                    success = true;
+                    break;
+                }
+
+                lastError = new Error('HTTP ' + response.status);
+            } catch (e) {
+                lastError = e;
+            }
+
+            if (attempt < MAX_RETRIES) {
+                const delay = Math.pow(2, attempt) * 1000;
+                await new Promise(resolve => setTimeout(resolve, delay));
+            }
+        }
+
+        if (!success) {
+            // 批量发送失败，整块加入离线队列（逐条加入，复用单条队列处理）
+            for (const item of chunk) {
+                await addToPendingQueue(item);
+            }
+            totalQueued += chunk.length;
+        }
+    }
+
+    return {
+        success: totalFailed === 0 && totalQueued === 0,
+        total: items.length,
+        inserted: totalInserted,
+        updated: totalUpdated,
+        failed: totalFailed,
+        queued: totalQueued,
+        skipped: items.length - uniqueItems.length
+    };
+}
+
 async function processPendingQueue() {
     const queue = await getPendingQueue();
     if (queue.length === 0) return;
@@ -238,6 +327,19 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             .catch(error => {
                 console.error('发送到后端异常:', error);
                 sendResponse({ success: false, error: error.message });
+            });
+
+        return true;
+    } else if (request.action === 'sendBatchToBackend') {
+        console.log('收到批量发送到后端的请求，共', (request.items || []).length, '条');
+
+        sendBatchToBackend(request.items)
+            .then(result => {
+                sendResponse(result);
+            })
+            .catch(error => {
+                console.error('批量发送异常:', error);
+                sendResponse({ success: false, error: error.message, total: (request.items || []).length, failed: (request.items || []).length });
             });
 
         return true;
