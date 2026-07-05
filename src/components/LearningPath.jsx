@@ -189,7 +189,11 @@ function LearningPath() {
                           }}
                         >
                           {masteryLabel}
-                          {kp.mastery_score !== null && kp.mastery_score !== undefined ? ` ${kp.mastery_score}%` : ''}
+                          {(() => {
+                            const score = kp.mastery_score;
+                            const numScore = typeof score === 'number' ? score : Number(score);
+                            return Number.isFinite(numScore) ? ` ${numScore}%` : '';
+                          })()}
                         </span>
                         {kp.pending_wrong > 0 && (
                           <span
@@ -267,17 +271,23 @@ function LearningPath() {
                                   }}
                                 >
                                   <span>{sib.name}</span>
-                                  {sib.mastery_score !== null && sib.mastery_score !== undefined && (
-                                    <span
-                                      style={{
-                                        fontSize: '0.7rem',
-                                        color: getMasteryColor(sib.mastery_score),
-                                        fontWeight: 600
-                                      }}
-                                    >
-                                      {sib.mastery_score}%
-                                    </span>
-                                  )}
+                                  {(() => {
+                                    // 后端返回 0-100 数字或 null，统一守卫避免 NaN/undefined
+                                    const score = sib.mastery_score;
+                                    const numScore = typeof score === 'number' ? score : Number(score);
+                                    if (!Number.isFinite(numScore)) return null;
+                                    return (
+                                      <span
+                                        style={{
+                                          fontSize: '0.7rem',
+                                          color: getMasteryColor(numScore),
+                                          fontWeight: 600
+                                        }}
+                                      >
+                                        {numScore}%
+                                      </span>
+                                    );
+                                  })()}
                                 </div>
                               ))}
                             </div>

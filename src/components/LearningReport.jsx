@@ -253,13 +253,15 @@ function LearningReport() {
               </thead>
               <tbody>
                 {weak_knowledge_points.map((kp, idx) => {
-                  const score = kp.mastery_score;
+                  const rawScore = kp.mastery_score;
+                  const score = typeof rawScore === 'number' ? rawScore : Number(rawScore);
+                  const hasScore = Number.isFinite(score);
                   return (
                     <tr key={idx} style={{ borderBottom: '1px solid #eee' }}>
                       <td style={{ padding: '0.6rem', color: '#333' }}>{kp.name}</td>
                       <td style={{ padding: '0.6rem' }}>
-                        <span style={{ color: getMasteryColor(score), fontWeight: 600 }}>
-                          {score !== null && score !== undefined ? `${score}%` : '未学习'}
+                        <span style={{ color: getMasteryColor(hasScore ? score : null), fontWeight: 600 }}>
+                          {hasScore ? `${score}%` : '未学习'}
                         </span>
                       </td>
                       <td style={{ padding: '0.6rem', color: '#666' }}>{kp.wrong_count || 0}</td>
