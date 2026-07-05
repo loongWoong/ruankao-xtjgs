@@ -627,7 +627,7 @@ def ensure_schema():
             )
         ''')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_practice_sessions_user ON practice_sessions(user_id, created_at)')
-        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_sessions_dedup ON practice_sessions(user_id, source_url, submitted_at)')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_practice_sessions_dedup ON practice_sessions(user_id, source_url, created_at)')
 
         conn.commit()
 
@@ -2301,6 +2301,9 @@ def add_practice_session():
     except (TypeError, ValueError):
         accuracy = 0.0
     score = max(0.0, min(score, 1000.0))
+    # accuracy 归一化：>1 视为百分制（如 69 表示 69%），转为 [0,1]
+    if accuracy > 1:
+        accuracy = accuracy / 100.0
     accuracy = max(0.0, min(accuracy, 1.0))
 
     # 时间字段兜底
@@ -2324,21 +2327,57 @@ def add_practice_session():
 
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        cursor.execute('''
-            INSERT INTO practice_sessions (
-                user_id, source_url, paper_name, total_questions,
+
+        # UPSERT 去重：同一 user_id + source_url 在 1 小时内的记录视为重复，
+        # 更新而非新增（submitted_at 是客户端毫秒级时间戳，作为唯一键不可靠）
+        existing_id = None
+        if clean_source_url:
+            cursor.execute('''
+                SELECT id FROM practice_sessions
+                WHERE user_id = ? AND source_url = ?
+                  AND created_at >= datetime('now', '-1 hour')
+                ORDER BY created_at DESC LIMIT 1
+            ''', (clean_user_id, clean_source_url))
+            row = cursor.fetchone()
+            if row:
+                existing_id = row[0]
+
+        if existing_id:
+            cursor.execute('''
+                UPDATE practice_sessions
+                SET paper_name = COALESCE(NULLIF(?, ''), paper_name),
+                    total_questions = ?,
+                    correct_count = ?,
+                    wrong_count = ?,
+                    score = ?,
+                    accuracy = ?,
+                    time_spent = ?,
+                    submitted_at = ?,
+                    raw_data = COALESCE(?, raw_data)
+                WHERE id = ?
+            ''', (
+                clean_paper_name, total_questions, correct_count, wrong_count,
+                score, accuracy, time_spent, submitted_at, raw_data_str, existing_id
+            ))
+            session_id = existing_id
+            is_new = False
+        else:
+            cursor.execute('''
+                INSERT INTO practice_sessions (
+                    user_id, source_url, paper_name, total_questions,
+                    correct_count, wrong_count, score, accuracy, time_spent,
+                    started_at, submitted_at, raw_data
+                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ''', (
+                clean_user_id, clean_source_url, clean_paper_name, total_questions,
                 correct_count, wrong_count, score, accuracy, time_spent,
-                started_at, submitted_at, raw_data
-            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-        ''', (
-            clean_user_id, clean_source_url, clean_paper_name, total_questions,
-            correct_count, wrong_count, score, accuracy, time_spent,
-            started_at, submitted_at, raw_data_str
-        ))
-        session_id = cursor.lastrowid
+                started_at, submitted_at, raw_data_str
+            ))
+            session_id = cursor.lastrowid
+            is_new = True
         conn.commit()
 
-    return jsonify({'success': True, 'id': session_id})
+    return jsonify({'success': True, 'id': session_id, 'is_new': is_new})
 
 @app.route('/api/practice-sessions', methods=['GET'])
 @api_response
