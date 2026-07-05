@@ -301,9 +301,11 @@ async function sendBatchToBackend(items) {
     };
 }
 
-async function sendSessionToBackend(sessionData) {
+async function sendSessionToBackend(sessionData, skipQueueOnFail = false, skipHistoryOnFail = false) {
     // 发送练习会话结果到后端。带 3 次重试，失败入离线队列（复用 pending_queue）。
     // 成功后写入本地 session_history 供 popup 展示最近采集。
+    // skipQueueOnFail: processPendingQueue 调用时传 true，避免重复入队
+    // skipHistoryOnFail: processPendingQueue 调用时传 true，避免历史污染
     if (!sessionData.user_id) {
         sessionData.user_id = getUserId();
     }
@@ -344,14 +346,18 @@ async function sendSessionToBackend(sessionData) {
         }
     }
 
-    // 失败：入离线队列 + 本地历史标记未同步
-    await addToPendingQueue({ type: 'session', data: sessionData });
-    await appendSessionHistory({
-        ...sessionData,
-        synced: false,
-        synced_at: Date.now()
-    });
-    return { success: false, error: lastError ? lastError.message : '未知错误', queued: true };
+    // 失败：入离线队列 + 本地历史标记未同步（processPendingQueue 调用时跳过）
+    if (!skipQueueOnFail) {
+        await addToPendingQueue({ type: 'session', data: sessionData });
+    }
+    if (!skipHistoryOnFail) {
+        await appendSessionHistory({
+            ...sessionData,
+            synced: false,
+            synced_at: Date.now()
+        });
+    }
+    return { success: false, error: lastError ? lastError.message : '未知错误', queued: !skipQueueOnFail };
 }
 
 async function appendSessionHistory(entry) {
@@ -392,8 +398,9 @@ async function processPendingQueue() {
             let result;
             // 支持两种队列项：单题（默认）和练习会话（type: 'session'）
             if (item.type === 'session') {
-                result = await sendSessionToBackend(item.data);
-                // 会话发送成功后从队列移除；失败则保留
+                // skipQueueOnFail + skipHistoryOnFail：失败时由 remaining 统一管理，
+                // 不再重复入队或追加历史（避免 popup 历史列表污染）
+                result = await sendSessionToBackend(item.data, true, true);
                 if (result.success) {
                     successCount++;
                 } else {
