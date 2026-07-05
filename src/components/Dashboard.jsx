@@ -110,16 +110,25 @@ function Dashboard() {
   const handleQuickCheckin = async () => {
     if (checkinBusy || goals.checked_in_today) return;
     setCheckinBusy(true);
+    let checkinOk = false;
     try {
       await checkin({ user_id: getUserId(), study_minutes: 30, note: '首页一键打卡' });
-      // 刷新 goals 与打卡状态
-      const refreshed = await getTodayStudyGoals();
-      setGoals(refreshed);
+      checkinOk = true;
     } catch (e) {
       console.error('打卡失败', e);
-    } finally {
-      setCheckinBusy(false);
+      alert('打卡失败: ' + (e.message || '未知错误'));
     }
+    // 即使后续刷新 goals 失败，也标记已打卡，避免用户重复点击
+    if (checkinOk) {
+      try {
+        const refreshed = await getTodayStudyGoals();
+        setGoals(refreshed);
+      } catch (e) {
+        console.error('刷新目标失败', e);
+        setGoals(prev => ({ ...prev, checked_in_today: true }));
+      }
+    }
+    setCheckinBusy(false);
   };
 
   const handleDownloadReport = (format) => {
@@ -432,14 +441,21 @@ function Dashboard() {
           <h2 className="section-title">认知热力图 (知识点掌握度)</h2>
           <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(200px, 1fr))', gap: '1rem', marginTop: '1rem' }}>
             {cognitionMap.length > 0 ? (
-              cognitionMap.map((kp, index) => (
-                <div 
-                  key={index} 
-                  className="cognition-bubble" 
-                  style={{ 
-                    padding: '1rem', 
-                    borderRadius: '12px', 
-                    backgroundColor: `rgba(244, 67, 54, ${1 - kp.score})`,
+              cognitionMap.map((kp, index) => {
+                // 未学习知识点 (score=null/undefined) 显示灰色，已学习按掌握度红色渐变
+                const hasScore = typeof kp.score === 'number' && Number.isFinite(kp.score);
+                const bgColor = hasScore
+                  ? `rgba(244, 67, 54, ${Math.max(0.15, 1 - kp.score)})`
+                  : '#f0f0f0';
+                const masteryLabel = hasScore ? `${Math.round(kp.score * 100)}%` : '未学习';
+                return (
+                <div
+                  key={index}
+                  className="cognition-bubble"
+                  style={{
+                    padding: '1rem',
+                    borderRadius: '12px',
+                    backgroundColor: bgColor,
                     border: '1px solid #ddd',
                     transition: 'all 0.3s ease',
                     cursor: 'pointer'
@@ -447,14 +463,15 @@ function Dashboard() {
                 >
                   <div style={{ fontWeight: 'bold', marginBottom: '0.5rem' }}>{kp.name}</div>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.8rem' }}>
-                    <span>掌握度: {Math.round((kp.score || 0) * 100)}%</span>
+                    <span>掌握度: {masteryLabel}</span>
                     <span>稳定性: {(kp.stability ?? 0).toFixed(1)}</span>
                   </div>
                   <div className="category-bar" style={{ height: '4px', background: '#eee', marginTop: '0.5rem' }}>
-                    <div className="category-bar-fill" style={{ width: `${(kp.score || 0) * 100}%`, background: '#4caf50', height: '100%' }} />
+                    <div className="category-bar-fill" style={{ width: `${hasScore ? kp.score * 100 : 0}%`, background: '#4caf50', height: '100%' }} />
                   </div>
                 </div>
-              ))
+                );
+              })
             ) : (
               <div className="empty-state">
                 <div className="empty-state-icon">🧠</div>
@@ -475,10 +492,10 @@ function Dashboard() {
                       className="chart-bar"
                       style={{ height: `${day.practiced > 0 ? (day.practiced / Math.max(...dailyStats.map(d => d.practiced), 1) * 100) : 0}%` }}
                     >
-                      <div className="chart-bar-value">{day.practiced}</div>
+                      <div className="chart-bar-value">{day.practiced || 0}</div>
                     </div>
-                    <div className="chart-bar-label">{day.date.slice(5)}</div>
-                    <div className="chart-bar-rate">{day.correct_rate}%</div>
+                    <div className="chart-bar-label">{(day.date || '').slice(5)}</div>
+                    <div className="chart-bar-rate">{day.correct_rate || 0}%</div>
                   </div>
                 ))}
               </div>
