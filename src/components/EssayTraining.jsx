@@ -121,6 +121,15 @@ function EssayTraining() {
       setError('论文内容不能为空');
       return;
     }
+    // 自评分数范围校验：0-75 分（软考论文满分 75）
+    let scoreValue = null;
+    if (selfScore && selfScore.trim() !== '') {
+      scoreValue = Number(selfScore);
+      if (isNaN(scoreValue) || scoreValue < 0 || scoreValue > 75) {
+        setError('自评分数必须在 0-75 分之间');
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     const timeSpent = startTimeRef.current ? Math.round((Date.now() - startTimeRef.current) / 1000) : 0;
@@ -129,7 +138,7 @@ function EssayTraining() {
       title: essayTitle,
       content: essayContent,
       time_spent: timeSpent,
-      self_score: selfScore ? Number(selfScore) : null,
+      self_score: scoreValue,
       self_evaluation: selfEvaluation,
       status
     };

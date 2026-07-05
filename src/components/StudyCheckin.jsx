@@ -71,15 +71,21 @@ function StudyCheckin() {
   };
 
   const handleCheckin = async () => {
+    // 学习时长范围校验：0-1440 分钟（一天）
+    const minutes = parseInt(checkinMinutes, 10);
+    if (isNaN(minutes) || minutes < 0 || minutes > 1440) {
+      setError('学习时长必须在 0-1440 分钟之间');
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {
       const data = await checkin({
-        study_minutes: parseInt(checkinMinutes, 10) || 0,
+        study_minutes: minutes,
         note: checkinNote
       });
       setStreak(prev => ({ ...prev, current_streak: data.streak, total_checkin_days: data.total_days, total_study_minutes: data.total_minutes }));
-      setToday({ checked_in: true, study_minutes: parseInt(checkinMinutes, 10) || 0, note: checkinNote });
+      setToday({ checked_in: true, study_minutes: minutes, note: checkinNote });
       loadCalendar();
     } catch (e) {
       setError(e.message || '打卡失败');

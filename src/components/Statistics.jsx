@@ -24,7 +24,7 @@ function Statistics() {
       setCategoryStats(categoryData.categories || []);
       setChapterStats(chapterData.chapters || []);
       setWeakPoints(weakPointsData.weak_points || []);
-      setDailyStats(dailyData.daily_stats || dailyData.daily || []);
+      setDailyStats(dailyData.daily_stats || []);
     } catch (error) {
       console.error('获取统计数据失败:', error);
     } finally {
