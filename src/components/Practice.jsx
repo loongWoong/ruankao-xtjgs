@@ -216,11 +216,15 @@ function Practice() {
       <div className="practice-card">
         <div className="practice-question">
           <span className="question-category">{currentQuestion.category || '未分类'}</span>
-          <p style={{ marginTop: '1rem' }}>{currentQuestion.question}</p>
+          <p style={{ marginTop: '1rem' }}>{currentQuestion.question || '（此题题干为空，请跳过）'}</p>
         </div>
 
         <div className="practice-options">
-          {currentQuestion.options && currentQuestion.options.map((opt, index) => {
+          {(!currentQuestion.options || currentQuestion.options.length === 0) ? (
+            <div className="empty-state" style={{ padding: '1rem', color: '#999' }}>
+              此题无选项，请跳过
+            </div>
+          ) : currentQuestion.options.map((opt, index) => {
             let className = 'practice-option';
             if (showResult) {
               if (opt.startsWith(currentQuestion.correct_answer)) className += ' correct';
