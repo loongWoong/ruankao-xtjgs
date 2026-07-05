@@ -21,13 +21,13 @@ function KnowledgeGraph() {
       setLoading(true);
       const [treeData, progressData, weakestData] = await Promise.all([
         getKnowledgeTree(),
-        getKnowledgeProgress(),
-        getWeakestKnowledge(10)
+        getKnowledgeProgress().catch(() => ({ progress: [] })),
+        getWeakestKnowledge(10).catch(() => ({ weak_points: [] }))
       ]);
-      setTree(treeData.tree || []);
-      setProgress(progressData.progress || progressData.chapters || []);
-      setWeakest(weakestData.weak_points || []);
-      const defaultExpanded = new Set((treeData.tree || []).slice(0, 3).map(ch => ch.id));
+      setTree(treeData?.tree || []);
+      setProgress(progressData?.progress || []);
+      setWeakest(weakestData?.weak_points || []);
+      const defaultExpanded = new Set((treeData?.tree || []).slice(0, 3).map(ch => ch.id));
       setExpandedChapters(defaultExpanded);
     } catch (err) {
       setError(err.message);
@@ -115,7 +115,12 @@ function KnowledgeGraph() {
         <div className="kg-tree-panel">
           <h2 className="section-title">知识树</h2>
           <div className="kg-tree">
-            {tree.map((chapter) => (
+            {tree.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem', color: '#999' }}>
+                <div className="empty-state-icon">📚</div>
+                <div>暂无知识点数据</div>
+              </div>
+            ) : tree.map((chapter) => (
               <div key={chapter.id} className="kg-chapter">
                 <div
                   className="kg-chapter-header"
@@ -197,8 +202,8 @@ function KnowledgeGraph() {
             <h3 className="side-card-title">📈 各章节进度</h3>
             <div className="progress-list">
               {(progress.length > 0 ? progress : tree).map((ch) => (
-                <div key={ch.id || ch.chapter_id} className="progress-item">
-                  <span className="progress-name">{ch.name || ch.chapter_name}</span>
+                <div key={ch.id} className="progress-item">
+                  <span className="progress-name">{ch.name}</span>
                   <div className="progress-bar-wrapper">
                     <div
                       className="progress-bar-fill"

@@ -26,10 +26,10 @@ function ReviewQueue() {
     try {
       const [queueData, upcomingData] = await Promise.all([
         getReviewQueue(limit),
-        getReviewUpcoming(14)
+        getReviewUpcoming(14).catch(() => ({ items: [] }))
       ]);
-      setQueue(queueData);
-      setUpcoming(upcomingData.items || []);
+      setQueue(queueData || { items: [], stats: {} });
+      setUpcoming(upcomingData?.items || []);
     } catch (e) {
       setError(e.message || '加载复习队列失败');
     } finally {
@@ -70,7 +70,12 @@ function ReviewQueue() {
       <h2 className="page-title">复习优先级队列</h2>
       <p className="page-subtitle">基于间隔重复算法，智能排序今日该复习的错题</p>
 
-      {error && <div className="error">{error}</div>}
+      {error && (
+        <div className="error" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+          <span>{error}</span>
+          <button className="btn btn-secondary" style={{ marginLeft: '1rem' }} onClick={loadData}>重试</button>
+        </div>
+      )}
 
       <div className="stats-grid">
         <div className="stat-card">

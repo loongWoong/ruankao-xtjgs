@@ -19,12 +19,12 @@ function WrongQuestionsAnalysis() {
         setLoading(true);
         setError(null);
         const [analysis, questionsData] = await Promise.all([
-          getWrongQuestionsAnalysis(),
-          getWrongQuestions({ limit: 50 })
+          getWrongQuestionsAnalysis().catch(() => ({ total_wrong: 0, category_stats: [], daily_stats: [] })),
+          getWrongQuestions({ limit: 50 }).catch(() => ({ items: [] }))
         ]);
         if (cancelled) return;
-        setAnalysisData(analysis);
-        setWrongQuestions(questionsData.items || []);
+        setAnalysisData(analysis || { total_wrong: 0, category_stats: [], daily_stats: [] });
+        setWrongQuestions(questionsData?.items || []);
       } catch (e) {
         if (!cancelled) setError(e.message || '加载分析数据失败');
       } finally {
