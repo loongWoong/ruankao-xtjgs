@@ -68,6 +68,37 @@ body {
   color: #333;
 }
 
+/* ===== 交互元素默认文字色（防止白底白字）===== */
+/* 任何背景为白/浅色的下拉框、输入框、按钮，文字默认使用深色 */
+select,
+input,
+textarea,
+button {
+  color: #333;
+}
+
+/* 下拉选项文字色（部分浏览器 option 不继承 select 的 color）*/
+option {
+  background: white;
+  color: #333;
+}
+
+/* 白底交互元素显式设置深色文字 */
+.filter-select,
+.nb-filter-select,
+.search-input,
+.sp-form-input,
+.sp-form-select,
+.me-form-input,
+.me-form-select,
+.nb-search-input,
+.nb-title-input,
+.nb-tags-input,
+.nb-content-textarea,
+.mode-btn {
+  color: #333;
+}
+
 /* ===== 全局焦点样式（键盘可访问性）===== */
 *:focus-visible {
   outline: 2px solid #667eea;
