@@ -87,7 +87,8 @@ function Dashboard() {
         },
         essay: {
           total: essayData.total_topics || 0,
-          submitted: essayData.submitted_count || 0
+          // total_submissions 含草稿+已提交，比 submitted_count（仅已提交）更能反映练习量
+          submitted: essayData.total_submissions || essayData.submitted_count || 0
         },
         caseQ: {
           total: caseData.total_cases || 0,

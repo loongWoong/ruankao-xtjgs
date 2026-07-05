@@ -414,7 +414,9 @@ function RealExam() {
 
   const renderResultView = () => {
     if (!examResult) return <div className="loading">加载结果中...</div>;
-    const { exam, questions: resultQuestions = [], correct_count = 0, total_questions = 0, score = 0 } = examResult;
+    const { exam = {}, questions: resultQuestions = [], correct_count = 0, score = 0 } = examResult;
+    // 后端 total_questions 在 exam.total_questions 内，顶层无此字段；以题目数量兜底
+    const total_questions = resultQuestions.length || exam.total_questions || 0;
     const pass = score >= 45;
 
     return (

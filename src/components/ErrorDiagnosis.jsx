@@ -85,7 +85,7 @@ function ErrorDiagnosis() {
                 {s.type === 'low_mastery' && '⚠️ '}
                 {s.message}
               </div>
-              {s.type === 'hot_questions' && s.detail && (
+              {s.type === 'hot_questions' && Array.isArray(s.detail) && (
                 <ul style={{ fontSize: '0.85rem', color: '#666', paddingLeft: '1.5rem', margin: '0.25rem 0' }}>
                   {s.detail.slice(0, 3).map((q, i) => (
                     <li key={i}>错 {q.wrong_count} 次: {q.question}...</li>
