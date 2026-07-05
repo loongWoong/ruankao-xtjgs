@@ -154,7 +154,13 @@ function collectCurrentQuestion() {
             options: options,
             correct_answer: correctAnswer,
             user_answer: userAnswer,
-            category: category,
+            // extractCategory 从 .secondChapterName 读取的是"章节名"（如"第三章 系统工程基础"），
+            // 后端 wrong_questions 表有独立的 chapter 列和 category 列：
+            //   - chapter 用于章节聚合（idx_wq_user_chapter 索引、WrongQuestionsAnalysis.jsx 按 chapter 分组）
+            //   - category 用于题型分类（单选/多选/判断）
+            // 旧代码把章节名塞进 category，导致 chapter 列恒空、章节索引失效、知识点映射退化。
+            chapter: category,
+            category: '',
             analysis: analysis,
             source_url: window.location.href  // 记录题目来源页，便于追溯
         };
@@ -435,18 +441,13 @@ function extractAnswers(questionElement) {
             rightKeyElements.forEach(el => {
                 try {
                     const text = el.textContent.trim();
-                    // 同时兼容全角"："与半角":"，并兼容"正确答案"/"你的答案"前后可能出现的空白
-                    const correctMatch = text.match(/正确答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
-                    const userMatch = text.match(/你的答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
-                    if (correctMatch) {
-                        correctAnswer = normalizeAnswer(correctMatch[1]);
-                    } else if (text.includes('正确答案')) {
-                        // 兜底：仅有"正确答案"字样但无冒号，截断后续标签避免解析文字混入
+                    // 主路径：extractAfterLabel 按 stop-word 截断，兼容判断题(正确/错误)、
+                    // 填空题(中文/特殊字符如 TCP/IP)、多选题(A B D) 等所有题型。
+                    // 旧正则 [A-Za-z0-9,，、\s]+ 会截断含 / ( ) - 等字符的答案。
+                    if (text.includes('正确答案') && !correctAnswer) {
                         correctAnswer = extractAfterLabel(text, '正确答案');
                     }
-                    if (userMatch) {
-                        userAnswer = normalizeAnswer(userMatch[1]);
-                    } else if (text.includes('你的答案')) {
+                    if (text.includes('你的答案') && !userAnswer) {
                         userAnswer = extractAfterLabel(text, '你的答案');
                     }
                 } catch (e) {
@@ -570,7 +571,8 @@ function collectQuestionElement(questionEl) {
             options: options,
             correct_answer: correctAnswer,
             user_answer: userAnswer,
-            category: category,
+            chapter: category,  // 章节名归入 chapter 列，保持与 collectCurrentQuestion 一致
+            category: '',
             analysis: analysis,
             source_url: window.location.href  // 记录题目来源页，便于追溯
         };
@@ -937,11 +939,15 @@ function collectPracticeSession() {
                 continue;
             }
         }
-        // 兜底：用 document.title，但过滤通用无意义标题
+        // 兜底：用 document.title，但剥离站点名后缀（如 "- 软考达人"），并过滤纯通用标题
         if (!paperName) {
-            const title = (document.title || '').trim();
-            const genericKeywords = ['软考达人', '在线题库', '软考', '题库', '首页'];
-            const isGeneric = !title || genericKeywords.some(kw => title.includes(kw)) || title.length < 4;
+            let title = (document.title || '').trim();
+            // 剥离尾部站点名："- 软考达人在线题库" / "| 软考达人" 等
+            title = title.replace(/\s*[-—|·]\s*软考达人.*$/).trim();
+            title = title.replace(/\s*[-—|·]\s*在线题库.*$/).trim();
+            // 仅当剥离后标题完全是通用关键词时才视为无意义
+            const exactGeneric = ['软考达人', '在线题库', '软考', '题库', '首页', ''];
+            const isGeneric = exactGeneric.indexOf(title) >= 0 || title.length < 4;
             paperName = isGeneric ? '' : title;
         }
 
