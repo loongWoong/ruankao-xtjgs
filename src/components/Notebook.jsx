@@ -47,6 +47,21 @@ const formatDate = (dateStr) => {
   return date.toLocaleDateString('zh-CN');
 };
 
+// 后端 tags 字段为逗号分隔字符串，统一转为数组
+const parseTags = (tags) => {
+  if (Array.isArray(tags)) return tags.filter(Boolean);
+  if (typeof tags === 'string') return tags.split(',').map(t => t.trim()).filter(Boolean);
+  return [];
+};
+
+// 后端 difficulty 为数字 1-5，转为标签
+const difficultyLabel = (d) => {
+  const n = Number(d);
+  if (n >= 4) return 'hard';
+  if (n === 3) return 'medium';
+  return 'easy';
+};
+
 const NoteTab = () => {
   const [notes, setNotes] = useState([]);
   const [selectedNote, setSelectedNote] = useState(null);
@@ -66,7 +81,7 @@ const NoteTab = () => {
       if (noteType) params.note_type = noteType;
       if (search) params.search = search;
       const data = await getNotes(params);
-      setNotes(data.notes || data || []);
+      setNotes(data.items || []);
     } catch (err) {
       console.error('获取笔记失败:', err);
       setNotes([]);
@@ -82,7 +97,7 @@ const NoteTab = () => {
     setSelectedNote(note);
     setTitle(note.title);
     setContent(note.content);
-    setTagsInput((note.tags || []).join(', '));
+    setTagsInput(parseTags(note.tags).join(', '));
     setIsFavorite(note.is_favorite || false);
     setIsEditing(false);
   };
@@ -211,7 +226,7 @@ const NoteTab = () => {
                 </p>
                 <div className="nb-note-meta">
                   <div className="nb-note-tags">
-                    {(note.tags || []).slice(0, 3).map((tag, idx) => {
+                    {parseTags(note.tags).slice(0, 3).map((tag, idx) => {
                       const color = getTagColor(tag);
                       return (
                         <span
@@ -310,7 +325,7 @@ const FavoriteTab = () => {
     setLoading(true);
     try {
       const data = await getFavorites(type);
-      setFavorites(data.favorites || data || []);
+      setFavorites(data.items || []);
     } catch (err) {
       console.error('获取收藏失败:', err);
       setFavorites([]);
@@ -405,7 +420,13 @@ const FlashcardTab = () => {
   const fetchStats = async () => {
     try {
       const data = await getFlashcardStats();
-      setStats(data || { total: 0, mastered: 0, due: 0, today: 0 });
+      // 后端字段：total_cards / mastered_count / due_count / today_review_count
+      setStats({
+        total: data.total_cards || 0,
+        mastered: data.mastered_count || 0,
+        due: data.due_count || 0,
+        today: data.today_review_count || 0
+      });
     } catch (err) {
       console.error('获取卡片统计失败:', err);
     }
@@ -414,7 +435,7 @@ const FlashcardTab = () => {
   const fetchCards = async () => {
     try {
       const data = await getFlashcards({ due_only: 1, page_size: 50 });
-      setCards(data.cards || data || []);
+      setCards(data.items || []);
       setCurrentIndex(0);
       setIsFlipped(false);
     } catch (err) {
@@ -488,7 +509,7 @@ const FlashcardTab = () => {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">今日需复习</div>
-          <div className="stat-card-value" style={{ color: '#667eea' }}>{stats.today || cards.length}</div>
+          <div className="stat-card-value" style={{ color: '#667eea' }}>{stats.today}</div>
         </div>
       </div>
 
@@ -583,11 +604,16 @@ const FlashcardTab = () => {
                   <div className="nb-card-list-front">{card.front}</div>
                   <div className="nb-card-list-back">{card.back}</div>
                   <div className="nb-card-list-meta">
-                    <span className={`nb-difficulty-badge nb-difficulty-${card.difficulty}`}>
-                      {card.difficulty === 'easy' ? '简单' : card.difficulty === 'medium' ? '中等' : '困难'}
-                    </span>
+                    {(() => {
+                      const d = difficultyLabel(card.difficulty);
+                      return (
+                        <span className={`nb-difficulty-badge nb-difficulty-${d}`}>
+                          {d === 'easy' ? '简单' : d === 'medium' ? '中等' : '困难'}
+                        </span>
+                      );
+                    })()}
                     <span className="nb-card-next-review">
-                      下次复习：{formatDate(card.next_review)}
+                      下次复习：{formatDate(card.next_review_at)}
                     </span>
                   </div>
                 </div>

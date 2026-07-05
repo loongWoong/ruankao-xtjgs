@@ -162,7 +162,7 @@ function MockExam() {
       const data = await createMockExam({
         title: detail.exam.title + ' (重做)',
         exam_type: detail.exam.exam_type,
-        question_count: detail.exam.question_count,
+        question_count: detail.exam.total_questions,
         duration_minutes: detail.exam.duration_minutes
       });
       if (data.success) {
@@ -277,7 +277,7 @@ function MockExam() {
                     <div className="me-exam-title">{exam.title}</div>
                     <div className="me-exam-meta">
                       <span className="me-exam-type">{getExamTypeLabel(exam.exam_type)}</span>
-                      <span>{exam.question_count} 题</span>
+                      <span>{exam.total_questions} 题</span>
                       <span>{formatDate(exam.created_at)}</span>
                     </div>
                   </div>
