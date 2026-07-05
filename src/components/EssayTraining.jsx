@@ -366,7 +366,7 @@ function EssayTraining() {
                 return (
                   <div key={sub.id} className="submission-item" onClick={() => viewSubmissionDetail(sub.id)}>
                     <div className="sub-info">
-                      <h4>{sub.topic_title}</h4>
+                      <h4>{sub.topic_title || '（无标题草稿）'}</h4>
                       <div className="sub-meta">
                         <span>{sub.year}年</span>
                         <span>{sub.word_count}字</span>
@@ -390,7 +390,7 @@ function EssayTraining() {
         <div className="submission-detail">
           <div className="writing-header">
             <button className="btn btn-back" onClick={() => setView('submissions')}>← 返回列表</button>
-            <h2>{currentSubmission.topic_title}</h2>
+            <h2>{currentSubmission.topic_title || '（无标题草稿）'}</h2>
           </div>
           <div className="detail-meta">
             <span>{currentSubmission.year}年</span>

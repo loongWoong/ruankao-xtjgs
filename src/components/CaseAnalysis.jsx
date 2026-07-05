@@ -319,7 +319,7 @@ function CaseAnalysis() {
                 return (
                   <div key={sub.id} className="submission-item" onClick={() => viewSubmissionDetail(sub.id)}>
                     <div className="sub-info">
-                      <h4>{sub.case_title}</h4>
+                      <h4>{sub.case_title || '（无标题草稿）'}</h4>
                       <div className="sub-meta">
                         <span>{sub.year}年</span>
                         {sub.self_score && <span>自评 {sub.self_score}分</span>}
@@ -342,7 +342,7 @@ function CaseAnalysis() {
         <div className="submission-detail">
           <div className="writing-header">
             <button className="btn btn-back" onClick={() => setView('submissions')}>← 返回列表</button>
-            <h2>{currentSubmission.case_title}</h2>
+            <h2>{currentSubmission.case_title || '（无标题草稿）'}</h2>
           </div>
           <div className="detail-meta">
             <span>{currentSubmission.year}年</span>
