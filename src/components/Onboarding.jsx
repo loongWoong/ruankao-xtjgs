@@ -106,8 +106,8 @@ function Onboarding({ onClose }) {
 
           {error && (
             <div style={{
-              padding: '0.75rem 1rem', background: '#fee2e2',
-              color: '#ef4444', borderRadius: '6px', marginBottom: '1rem',
+              padding: '0.75rem 1rem', background: '#ffebee',
+              color: '#f44336', borderRadius: '6px', marginBottom: '1rem',
               fontSize: '0.9rem'
             }}>{error}</div>
           )}

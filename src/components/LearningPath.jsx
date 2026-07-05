@@ -4,8 +4,8 @@ import { getLearningPathRecommend } from '../utils/api';
 import LoadingSpinner from './LoadingSpinner';
 
 const ACTION_STYLE = {
-  review: { color: '#ef4444', bg: '#fee2e2', icon: '🔁' },
-  practice: { color: '#f59e0b', bg: '#fef3c7', icon: '✍️' },
+  review: { color: '#f44336', bg: '#ffebee', icon: '🔁' },
+  practice: { color: '#ff9800', bg: '#fff3e0', icon: '✍️' },
   learn: { color: '#2196f3', bg: '#e3f2fd', icon: '📖' }
 };
 
@@ -201,8 +201,8 @@ function LearningPath() {
                               padding: '0.2rem 0.6rem',
                               borderRadius: '12px',
                               fontSize: '0.75rem',
-                              background: '#fee2e2',
-                              color: '#ef4444',
+                              background: '#ffebee',
+                              color: '#f44336',
                               fontWeight: 600
                             }}
                           >

@@ -8,9 +8,9 @@ import {
 } from '../utils/api.js';
 
 const STATUS_MAP = {
-  unread: { label: '未读', color: '#6b7280', bg: '#f3f4f6' },
-  reading: { label: '阅读中', color: '#f59e0b', bg: '#fef3c7' },
-  completed: { label: '已完成', color: '#10b981', bg: '#d1fae5' }
+  unread: { label: '未读', color: '#6b7280', bg: '#fafafa' },
+  reading: { label: '阅读中', color: '#ff9800', bg: '#fff3e0' },
+  completed: { label: '已完成', color: '#4caf50', bg: '#e8f5e9' }
 };
 
 function Textbook() {
