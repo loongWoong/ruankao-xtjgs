@@ -2,10 +2,10 @@ import React, { useState, useEffect } from 'react';
 import { getSyllabusCoverage } from '../utils/api';
 
 const STATUS_CONFIG = {
-  unread: { label: '未学习', color: '#9ca3af', bgColor: '#f3f4f6', icon: '⚪' },
+  unread: { label: '未学习', color: '#9ca3af', bgColor: '#fafafa', icon: '⚪' },
   learning: { label: '学习中', color: '#667eea', bgColor: '#eef1ff', icon: '🔵' },
-  weak: { label: '薄弱', color: '#f59e0b', bgColor: '#fef3c7', icon: '🟡' },
-  mastered: { label: '已掌握', color: '#10b981', bgColor: '#d1fae5', icon: '🟢' }
+  weak: { label: '薄弱', color: '#ff9800', bgColor: '#fff3e0', icon: '🟡' },
+  mastered: { label: '已掌握', color: '#4caf50', bgColor: '#e8f5e9', icon: '🟢' }
 };
 
 function SyllabusCoverage() {
@@ -104,14 +104,14 @@ function SyllabusCoverage() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">已掌握</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>
             {stats.statusCount.mastered || 0}
           </div>
           <div className="stat-card-sub">个章节</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">薄弱章节</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>
             {(stats.statusCount.weak || 0) + (stats.statusCount.unread || 0)}
           </div>
           <div className="stat-card-sub">需要加强</div>
@@ -195,7 +195,7 @@ function SyllabusCoverage() {
                             <div style={{
                               width: `${coverage}%`,
                               height: '100%',
-                              background: coverage >= 80 ? '#10b981' : coverage >= 50 ? '#667eea' : '#f59e0b'
+                              background: coverage >= 80 ? '#4caf50' : coverage >= 50 ? '#667eea' : '#ff9800'
                             }} />
                           </div>
                           <span style={{ minWidth: '40px', textAlign: 'right' }}>{coverage.toFixed(0)}%</span>
@@ -207,7 +207,7 @@ function SyllabusCoverage() {
                             <div style={{
                               width: `${mastery}%`,
                               height: '100%',
-                              background: mastery >= 80 ? '#10b981' : mastery >= 50 ? '#667eea' : '#ef4444'
+                              background: mastery >= 80 ? '#4caf50' : mastery >= 50 ? '#667eea' : '#f44336'
                             }} />
                           </div>
                           <span style={{ minWidth: '40px', textAlign: 'right' }}>{mastery ? mastery.toFixed(0) : 0}%</span>
@@ -215,7 +215,7 @@ function SyllabusCoverage() {
                       </td>
                       <td style={{ padding: '0.75rem' }}>
                         {ch.wrong_count > 0 ? (
-                          <span style={{ color: '#ef4444', fontWeight: 600 }}>{ch.wrong_count}</span>
+                          <span style={{ color: '#f44336', fontWeight: 600 }}>{ch.wrong_count}</span>
                         ) : (
                           <span style={{ color: '#ccc' }}>0</span>
                         )}
@@ -261,7 +261,7 @@ function SyllabusCoverage() {
             <div>🟢 <strong>{stats.statusCount.mastered}</strong> 个章节已掌握，定期复习以防遗忘</div>
           )}
           {stats.wrongCount > 0 && (
-            <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#fef3c7', borderRadius: '6px', color: '#92400e' }}>
+            <div style={{ marginTop: '0.5rem', padding: '0.75rem', background: '#fff3e0', borderRadius: '6px', color: '#92400e' }}>
               ⚠️ 当前累计 <strong>{stats.wrongCount}</strong> 道错题，建议前往「错题库」集中复习
             </div>
           )}

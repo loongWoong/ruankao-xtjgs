@@ -3,10 +3,10 @@ import { getReviewQueue, getReviewUpcoming } from '../utils/api';
 import { Link } from 'react-router-dom';
 
 const PRIORITY_LABELS = {
-  1: { label: '逾期', color: '#ef4444', bgColor: '#fee2e2' },
-  2: { label: '今日到期', color: '#f59e0b', bgColor: '#fef3c7' },
+  1: { label: '逾期', color: '#f44336', bgColor: '#ffebee' },
+  2: { label: '今日到期', color: '#ff9800', bgColor: '#fff3e0' },
   3: { label: '新错题', color: '#667eea', bgColor: '#eef1ff' },
-  4: { label: '未到期', color: '#9ca3af', bgColor: '#f3f4f6' }
+  4: { label: '未到期', color: '#9ca3af', bgColor: '#fafafa' }
 };
 
 function ReviewQueue() {
@@ -85,12 +85,12 @@ function ReviewQueue() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">逾期</div>
-          <div className="stat-card-value" style={{ color: '#ef4444' }}>{stats.overdue_count || 0}</div>
+          <div className="stat-card-value" style={{ color: '#f44336' }}>{stats.overdue_count || 0}</div>
           <div className="stat-card-sub">需立即复习</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">今日到期</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{stats.today_count || 0}</div>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>{stats.today_count || 0}</div>
           <div className="stat-card-sub">SRS 排程</div>
         </div>
         <div className="stat-card">

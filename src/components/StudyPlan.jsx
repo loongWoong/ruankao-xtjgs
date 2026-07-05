@@ -10,8 +10,8 @@ import {
 
 const TASK_TYPE_MAP = {
   learn: { label: '新学', color: '#667eea', bgColor: '#eef1ff' },
-  review: { label: '复习', color: '#f59e0b', bgColor: '#fef3c7' },
-  practice: { label: '练习', color: '#10b981', bgColor: '#d1fae5' }
+  review: { label: '复习', color: '#ff9800', bgColor: '#fff3e0' },
+  practice: { label: '练习', color: '#4caf50', bgColor: '#e8f5e9' }
 };
 
 const STUDY_TIPS = [
@@ -196,7 +196,7 @@ function StudyPlan() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">今日完成</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>
             {todayStats.completed_tasks}
           </div>
           <div className="stat-card-sub">
@@ -205,7 +205,7 @@ function StudyPlan() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">总进度</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{totalProgress}%</div>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>{totalProgress}%</div>
           <div className="stat-card-sub">整体完成进度</div>
         </div>
       </div>
@@ -320,7 +320,7 @@ function StudyPlan() {
                                     className="sp-task-progress-fill"
                                     style={{
                                       width: `${progress}%`,
-                                      background: isCompleted ? '#10b981' : typeInfo.color
+                                      background: isCompleted ? '#4caf50' : typeInfo.color
                                     }}
                                   />
                                 </div>

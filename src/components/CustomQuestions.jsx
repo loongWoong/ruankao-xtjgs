@@ -238,8 +238,8 @@ function CustomQuestions() {
                     <div style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.5rem' }}>
                       {Object.entries(opts).filter(([k, v]) => v && v.trim()).map(([k, v]) => (
                         <div key={k} style={{ padding: '0.15rem 0' }}>
-                          <strong style={{ color: q.correct_answer === k ? '#10b981' : '#888' }}>{k}.</strong> {v}
-                          {q.correct_answer === k && <span style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ 正确答案</span>}
+                          <strong style={{ color: q.correct_answer === k ? '#4caf50' : '#888' }}>{k}.</strong> {v}
+                          {q.correct_answer === k && <span style={{ color: '#4caf50', marginLeft: '0.5rem' }}>✓ 正确答案</span>}
                         </div>
                       ))}
                     </div>
@@ -251,7 +251,7 @@ function CustomQuestions() {
                   )}
                   <div style={{ display: 'flex', gap: '0.5rem', marginTop: '0.5rem' }}>
                     <button className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '0.25rem 0.75rem' }} onClick={() => handleEdit(q)}>编辑</button>
-                    <button className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '0.25rem 0.75rem', color: '#ef4444' }} onClick={() => handleDelete(q.id)}>删除</button>
+                    <button className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '0.25rem 0.75rem', color: '#f44336' }} onClick={() => handleDelete(q.id)}>删除</button>
                   </div>
                 </div>
               );
@@ -334,7 +334,7 @@ function CustomQuestions() {
                     checked={formData.correct_answer === k}
                     onChange={() => setFormData(prev => ({ ...prev, correct_answer: k }))}
                   />
-                  <span style={{ fontWeight: 600, color: formData.correct_answer === k ? '#10b981' : '#888' }}>{k}.</span>
+                  <span style={{ fontWeight: 600, color: formData.correct_answer === k ? '#4caf50' : '#888' }}>{k}.</span>
                   <input
                     type="text"
                     className="sp-form-input"
@@ -443,12 +443,12 @@ function CustomQuestions() {
           <h3 className="section-title"><span>📋</span>导入结果</h3>
           <div style={{ padding: '1rem' }}>
             <div style={{ marginBottom: '0.5rem' }}>
-              ✅ 成功导入: <strong style={{ color: '#10b981' }}>{importResult.imported}</strong> / {importResult.total}
+              ✅ 成功导入: <strong style={{ color: '#4caf50' }}>{importResult.imported}</strong> / {importResult.total}
             </div>
             {importResult.errors && importResult.errors.length > 0 && (
               <div>
-                <div style={{ color: '#ef4444', marginBottom: '0.5rem' }}>❌ 失败 {importResult.errors.length} 条:</div>
-                <ul style={{ color: '#ef4444', fontSize: '0.85rem', paddingLeft: '1.5rem' }}>
+                <div style={{ color: '#f44336', marginBottom: '0.5rem' }}>❌ 失败 {importResult.errors.length} 条:</div>
+                <ul style={{ color: '#f44336', fontSize: '0.85rem', paddingLeft: '1.5rem' }}>
                   {importResult.errors.map((err, idx) => <li key={idx}>{err}</li>)}
                 </ul>
               </div>

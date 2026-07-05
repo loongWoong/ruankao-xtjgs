@@ -209,7 +209,7 @@ function RealExam() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">最高分</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>{stats.best_score || 0}</div>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>{stats.best_score || 0}</div>
           <div className="stat-card-sub">满分75</div>
         </div>
       </div>
@@ -396,7 +396,7 @@ function RealExam() {
               第 {currentIndex + 1} / {examQuestions.length} 题 · 已答 {answeredCount} 题
             </div>
           </div>
-          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: timeLeft < 300 ? '#ef4444' : '#667eea', fontFamily: 'monospace' }}>
+          <div style={{ fontSize: '1.5rem', fontWeight: 700, color: timeLeft < 300 ? '#f44336' : '#667eea', fontFamily: 'monospace' }}>
             ⏰ {formatTime(timeLeft)}
           </div>
         </div>
@@ -475,7 +475,7 @@ function RealExam() {
                   className="btn"
                   style={{
                     width: '36px', height: '36px', padding: 0,
-                    background: idx === currentIndex ? '#667eea' : (answers[idx] ? '#d1fae5' : '#f0f0f0'),
+                    background: idx === currentIndex ? '#667eea' : (answers[idx] ? '#e8f5e9' : '#f0f0f0'),
                     color: idx === currentIndex ? '#fff' : '#333',
                     border: 'none', borderRadius: '4px', cursor: 'pointer'
                   }}
@@ -502,7 +502,7 @@ function RealExam() {
         <div className="section-card" style={{ textAlign: 'center', padding: '2rem' }}>
           <div style={{
             fontSize: '3rem', fontWeight: 700,
-            color: pass ? '#10b981' : '#ef4444',
+            color: pass ? '#4caf50' : '#f44336',
             marginBottom: '0.5rem'
           }}>
             {score}
@@ -510,8 +510,8 @@ function RealExam() {
           </div>
           <div style={{
             display: 'inline-block', padding: '0.4rem 1rem', borderRadius: '20px',
-            background: pass ? '#d1fae5' : '#fee2e2',
-            color: pass ? '#10b981' : '#ef4444',
+            background: pass ? '#e8f5e9' : '#ffebee',
+            color: pass ? '#4caf50' : '#f44336',
             fontWeight: 600
           }}>
             {pass ? '✓ 通过' : '✗ 未通过（需≥45分）'}
@@ -529,14 +529,14 @@ function RealExam() {
               <div key={idx} style={{ padding: '1rem', borderBottom: '1px solid #eee' }}>
                 <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.5rem' }}>
                   <span style={{ fontWeight: 600 }}>第 {idx + 1} 题</span>
-                  <span style={{ color: isCorrect ? '#10b981' : '#ef4444', fontWeight: 600 }}>
+                  <span style={{ color: isCorrect ? '#4caf50' : '#f44336', fontWeight: 600 }}>
                     {isCorrect ? '✓ 正确' : '✗ 错误'}
                   </span>
                 </div>
                 <div style={{ marginBottom: '0.5rem' }}>{q.question_text}</div>
                 <div style={{ fontSize: '0.9rem', color: '#555' }}>
-                  <div>你的答案: <strong style={{ color: isCorrect ? '#10b981' : '#ef4444' }}>{q.user_answer || '未作答'}</strong></div>
-                  {!isCorrect && <div style={{ color: '#10b981' }}>正确答案: <strong>{q.correct_answer}</strong></div>}
+                  <div>你的答案: <strong style={{ color: isCorrect ? '#4caf50' : '#f44336' }}>{q.user_answer || '未作答'}</strong></div>
+                  {!isCorrect && <div style={{ color: '#4caf50' }}>正确答案: <strong>{q.correct_answer}</strong></div>}
                   {q.explanation && (
                     <div style={{ marginTop: '0.5rem', padding: '0.5rem', background: '#f9fafb', borderRadius: '4px' }}>
                       💡 {q.explanation}

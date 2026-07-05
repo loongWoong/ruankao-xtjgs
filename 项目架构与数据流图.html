@@ -1,0 +1,726 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>软考错题分析系统 - 项目架构与数据流图</title>
+<script src="https://cdn.jsdelivr.net/npm/mermaid@10/dist/mermaid.min.js"></script>
+<style>
+* { box-sizing: border-box; margin: 0; padding: 0; }
+body {
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", sans-serif;
+    line-height: 1.7;
+    color: #2c3e50;
+    background: #f5f7fa;
+    padding: 20px;
+}
+.container { max-width: 1400px; margin: 0 auto; background: #fff; padding: 40px; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.08); }
+h1 { color: #1a5276; font-size: 2em; border-bottom: 3px solid #3498db; padding-bottom: 12px; margin-bottom: 8px; }
+.subtitle { color: #7f8c8d; font-size: 0.95em; margin-bottom: 30px; }
+h2 { color: #2874a6; font-size: 1.5em; margin: 36px 0 16px; padding-left: 12px; border-left: 5px solid #3498db; }
+h3 { color: #2e86c1; font-size: 1.2em; margin: 24px 0 12px; }
+h4 { color: #34495e; font-size: 1.05em; margin: 16px 0 8px; }
+p { margin-bottom: 10px; }
+.meta { background: #eaf2f8; padding: 14px 18px; border-radius: 8px; margin-bottom: 24px; border-left: 4px solid #3498db; }
+.meta strong { color: #1a5276; }
+.toc { background: #f8f9fa; padding: 18px 24px; border-radius: 8px; margin-bottom: 30px; border: 1px solid #e1e8ed; }
+.toc h3 { margin-top: 0; color: #2874a6; }
+.toc ul { list-style: none; padding-left: 8px; }
+.toc li { padding: 4px 0; }
+.toc a { color: #3498db; text-decoration: none; }
+.toc a:hover { text-decoration: underline; }
+.diagram-box { background: #fafbfc; border: 1px solid #e1e8ed; border-radius: 8px; padding: 20px; margin: 16px 0; overflow-x: auto; }
+.diagram-title { font-weight: 600; color: #2874a6; margin-bottom: 10px; font-size: 1em; }
+table { width: 100%; border-collapse: collapse; margin: 12px 0; font-size: 0.92em; }
+th { background: #2874a6; color: #fff; padding: 10px 12px; text-align: left; font-weight: 600; }
+td { padding: 8px 12px; border-bottom: 1px solid #e1e8ed; }
+tr:nth-child(even) { background: #f8f9fa; }
+tr:hover { background: #eaf2f8; }
+code { background: #f4d03f; padding: 2px 6px; border-radius: 3px; font-family: "SF Mono", "Fira Code", Consolas, monospace; font-size: 0.9em; color: #7d6608; }
+pre { background: #2c3e50; color: #ecf0f1; padding: 16px; border-radius: 8px; overflow-x: auto; margin: 12px 0; font-size: 0.88em; }
+pre code { background: transparent; color: inherit; padding: 0; }
+.stat-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(200px, 1fr)); gap: 16px; margin: 20px 0; }
+.stat-card { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: #fff; padding: 20px; border-radius: 10px; text-align: center; box-shadow: 0 4px 12px rgba(0,0,0,0.15); }
+.stat-card .num { font-size: 2.2em; font-weight: 700; display: block; }
+.stat-card .label { font-size: 0.9em; opacity: 0.9; margin-top: 4px; }
+.stat-card.green { background: linear-gradient(135deg, #11998e 0%, #38ef7d 100%); }
+.stat-card.orange { background: linear-gradient(135deg, #f12711 0%, #f5af19 100%); }
+.stat-card.blue { background: linear-gradient(135deg, #2193b0 0%, #6dd5ed 100%); }
+.stat-card.purple { background: linear-gradient(135deg, #834d9b 0%, #d04ed6 100%); }
+.feature-list { display: grid; grid-template-columns: repeat(auto-fit, minmax(300px, 1fr)); gap: 16px; margin: 16px 0; }
+.feature-card { background: #fff; border: 1px solid #e1e8ed; border-radius: 8px; padding: 16px; transition: transform 0.2s, box-shadow 0.2s; }
+.feature-card:hover { transform: translateY(-2px); box-shadow: 0 6px 16px rgba(0,0,0,0.08); }
+.feature-card h4 { color: #2874a6; margin-bottom: 8px; }
+.feature-card .tag { display: inline-block; background: #eaf2f8; color: #2874a6; padding: 2px 8px; border-radius: 10px; font-size: 0.8em; margin-right: 4px; }
+.section { margin: 30px 0; padding: 24px; background: #fff; border: 1px solid #e1e8ed; border-radius: 10px; }
+.section-accent { border-left: 4px solid #3498db; }
+.badge { display: inline-block; padding: 3px 10px; border-radius: 12px; font-size: 0.8em; font-weight: 600; margin-right: 6px; }
+.badge-p0 { background: #ffebee; color: #c62828; }
+.badge-p1 { background: #fff3e0; color: #e65100; }
+.badge-get { background: #e8f5e9; color: #2e7d32; }
+.badge-post { background: #e3f2fd; color: #1565c0; }
+.badge-put { background: #fff8e1; color: #f57f17; }
+.badge-delete { background: #fce4ec; color: #ad1457; }
+.arch-layer { padding: 18px; border-radius: 10px; margin: 12px 0; color: #fff; }
+.arch-layer h3 { color: #fff; margin-top: 0; }
+.layer-collect { background: linear-gradient(135deg, #667eea, #764ba2); }
+.layer-process { background: linear-gradient(135deg, #f093fb, #f5576c); }
+.layer-show { background: linear-gradient(135deg, #4facfe, #00f2fe); }
+.note { background: #fff9c4; padding: 12px 16px; border-radius: 6px; margin: 12px 0; border-left: 4px solid #fbc02d; font-size: 0.92em; }
+.footer { text-align: center; color: #95a5a6; padding: 20px 0; margin-top: 30px; border-top: 1px solid #e1e8ed; }
+.mermaid { text-align: center; }
+@media (max-width: 768px) {
+    .container { padding: 20px; }
+    .stat-grid { grid-template-columns: 1fr 1fr; }
+    table { font-size: 0.85em; }
+}
+</style>
+</head>
+<body>
+<div class="container">
+
+<h1>软考错题分析系统 - 项目架构与数据流图</h1>
+<div class="subtitle">技术栈：Flask + SQLite（后端） · React + Vite（前端） · Chrome Extension MV3（插件）</div>
+
+<div class="meta">
+    <strong>项目路径：</strong> <code>/Users/wanglongzhen/Downloads/ruankao-xtjgs</code><br>
+    <strong>生成时间：</strong> 2026-07-05<br>
+    <strong>文档定位：</strong> 功能架构图 + 数据流图 + 数据库 ER 图 + 模块详解
+</div>
+
+<div class="stat-grid">
+    <div class="stat-card blue"><span class="num">100</span><span class="label">API 路由</span></div>
+    <div class="stat-card green"><span class="num">27</span><span class="label">数据库表</span></div>
+    <div class="stat-card orange"><span class="num">21</span><span class="label">前端路由</span></div>
+    <div class="stat-card purple"><span class="num">25</span><span class="label">React 组件</span></div>
+</div>
+
+<div class="toc">
+    <h3>目录</h3>
+    <ul>
+        <li><a href="#overview">一、项目总览与三层架构</a></li>
+        <li><a href="#arch">二、功能架构图</a></li>
+        <li><a href="#backend">三、后端模块详解（100 条 API）</a></li>
+        <li><a href="#frontend">四、前端模块详解（21 条路由）</a></li>
+        <li><a href="#plugin">五、浏览器插件模块详解</a></li>
+        <li><a href="#flow1">六、数据流图：错题采集流</a></li>
+        <li><a href="#flow2">七、数据流图：练习会话流</a></li>
+        <li><a href="#flow3">八、数据流图：统计分析流</a></li>
+        <li><a href="#flow4">九、数据流图：离线队列容错流</a></li>
+        <li><a href="#er">十、数据库 ER 图</a></li>
+        <li><a href="#features">十一、关键架构特征</a></li>
+    </ul>
+</div>
+
+<!-- 一、项目总览 -->
+<h2 id="overview">一、项目总览与三层架构</h2>
+
+<div class="arch-layer layer-collect">
+    <h3>数据采集层 — Chrome Extension MV3</h3>
+    <p>从 ruankaodaren.com 抓取题目 DOM、选项、答案、解析、练习结果。content.js 注入页面采集，background.js 中转去重，popup 提供交互 UI。</p>
+</div>
+
+<div class="arch-layer layer-process">
+    <h3>数据处理层 — Flask + SQLite Backend</h3>
+    <p>单文件 app.py（~6500 行），提供 100 条 RESTful API。UPSERT 入库，SRS 间隔重复算法，统一异常处理，按 IP 限流。</p>
+</div>
+
+<div class="arch-layer layer-show">
+    <h3>数据展示层 — React + Vite Frontend</h3>
+    <p>21 条路由，25 个业务组件。无 UI 框架依赖，纯 CSS/SVG 实现图表。fetchAPI 统一封装，自动拼接 user_id。</p>
+</div>
+
+<!-- 二、功能架构图 -->
+<h2 id="arch">二、功能架构图</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">系统功能架构总览</div>
+    <div class="mermaid">
+graph TB
+    subgraph 用户层
+        USER[用户]
+        BROWSER[Chrome 浏览器]
+        DASHBOARD[前端 Dashboard<br/>localhost:5173]
+    end
+
+    subgraph 数据采集层 Chrome Extension MV3
+        POPUP[popup.html/js<br/>弹窗 UI<br/>统计卡片/采集按钮/历史列表]
+        CONTENT[content.js<br/>DOM 采集脚本<br/>注入到 ruankaodaren.com]
+        BG[background.js<br/>Service Worker<br/>中转/去重/离线队列]
+        STORAGE[(chrome.storage.local<br/>user_id/dedup_map/<br/>pending_queue/session_history)]
+    end
+
+    subgraph 数据处理层 Flask Backend
+        API[app.py<br/>100 条 RESTful API<br/>api_response 统一异常处理]
+        UPSERT[UPSERT 逻辑<br/>question_id + user_id 去重]
+        SRS[SRS 间隔重复算法<br/>1-2-4-7-15-30-60-120 天]
+        SCHEMA[ensure_schema<br/>27 张表 + 动态迁移]
+        DB[(SQLite<br/>ruankao.db)]
+    end
+
+    subgraph 数据展示层 React Frontend
+        ROUTER[react-router-dom<br/>21 条路由]
+        QBank[QuestionBank<br/>错题库]
+        STATS[Statistics<br/>统计]
+        RADAR[AbilityRadar<br/>能力雷达]
+        PLAN[StudyPlan<br/>学习计划]
+        EXAM[MockExam<br/>模拟考试]
+        OTHER[其他 20 个组件<br/>练习/论文/案例/教材...]
+    end
+
+    subgraph 外部数据源
+        SITE[ruankaodaren.com<br/>软考达人在线题库]
+    end
+
+    USER --> BROWSER
+    BROWSER --> SITE
+    BROWSER --> POPUP
+    BROWSER --> DASHBOARD
+
+    SITE --> CONTENT
+    CONTENT --> BG
+    BG --> STORAGE
+    BG -->|HTTP POST| API
+
+    POPUP -->|sendMessage| BG
+    POPUP -->|sendMessage| CONTENT
+
+    API --> UPSERT
+    API --> SRS
+    API --> SCHEMA
+    UPSERT --> DB
+    SRS --> DB
+    SCHEMA --> DB
+
+    DASHBOARD --> ROUTER
+    ROUTER --> QBank
+    ROUTER --> STATS
+    ROUTER --> RADAR
+    ROUTER --> PLAN
+    ROUTER --> EXAM
+    ROUTER --> OTHER
+
+    QBank -->|fetchAPI| API
+    STATS -->|fetchAPI| API
+    RADAR -->|fetchAPI| API
+    PLAN -->|fetchAPI| API
+    EXAM -->|fetchAPI| API
+    OTHER -->|fetchAPI| API
+    </div>
+</div>
+
+<!-- 三、后端模块 -->
+<h2 id="backend">三、后端模块详解</h2>
+
+<h3>核心工具函数</h3>
+<table>
+<tr><th>函数</th><th>职责</th></tr>
+<tr><td><code>@api_response</code></td><td>统一异常处理：ValueError→400、KeyError→400、其他→500</td></tr>
+<tr><td><code>@rate_limit</code></td><td>按 IP 限流（120 次/分钟）</td></tr>
+<tr><td><code>get_db_conn()</code></td><td>SQLite 连接上下文管理器（防泄漏）</td></tr>
+<tr><td><code>sanitize_string()</code></td><td>字符串清洗：strip、截断、去控制字符</td></tr>
+<tr><td><code>safe_int()</code></td><td>安全整数转换</td></tr>
+<tr><td><code>get_user_id()</code></td><td>从 query 取 user_id 并 sanitize（默认 default_user）</td></tr>
+<tr><td><code>get_pagination_params()</code></td><td>分页参数解析（limit ≤ 100）</td></tr>
+<tr><td><code>ensure_schema()</code></td><td>建表 + 动态 ALTER TABLE 迁移</td></tr>
+</table>
+
+<h3>API 路由分组（共 100 条）</h3>
+<table>
+<tr><th>分组</th><th>数量</th><th>代表性路由</th></tr>
+<tr><td>健康检查/元信息</td><td>3</td><td><code>GET /api/health</code>、<code>GET /api/feature-flags</code></td></tr>
+<tr><td>错题管理</td><td>14</td><td><span class="badge badge-post">POST</span><code>/api/wrong-questions</code>、<code>/batch</code>、<span class="badge badge-get">GET</span><code>/analysis</code>、<code>/export/csv</code></td></tr>
+<tr><td>练习会话采集</td><td>2</td><td><span class="badge badge-post">POST</span><code>/api/practice-sessions</code>（UPSERT 5 分钟窗口）</td></tr>
+<tr><td>练习出题与作答</td><td>8</td><td><code>/api/practice/random</code>、<code>/submit-real-exam</code></td></tr>
+<tr><td>统计分析</td><td>8</td><td><code>/api/stats/overview</code>、<code>/category</code>、<code>/chapter</code>、<code>/weak-points</code>、<code>/cognition</code></td></tr>
+<tr><td>知识点/知识图谱</td><td>4</td><td><code>/api/knowledge/tree</code>、<code>/weakest</code>、<code>/progress</code></td></tr>
+<tr><td>学习计划</td><td>6</td><td><code>POST /api/study-plan</code>、<code>/tasks/&lt;id&gt;/complete</code>、<code>/regenerate</code></td></tr>
+<tr><td>模拟考试</td><td>8</td><td><code>/api/mock-exam/create</code>、<code>/start</code>、<code>/answer</code>、<code>/submit</code>、<code>/result</code></td></tr>
+<tr><td>错题诊断/错因分析</td><td>8</td><td><code>/api/error-analysis/analyze/&lt;id&gt;</code>、<code>/distribution</code>、<code>/trend</code></td></tr>
+<tr><td>笔记/收藏/闪卡</td><td>10</td><td><code>/api/notes</code>、<code>/favorites</code>、<code>/flashcards/&lt;id&gt;/review</code></td></tr>
+<tr><td>论文训练</td><td>6</td><td><code>/api/essay/topics</code>、<code>/submit</code>、<code>/stats</code></td></tr>
+<tr><td>案例分析</td><td>6</td><td><code>/api/case/questions</code>、<code>/submit</code>、<code>/stats</code></td></tr>
+<tr><td>教材学习</td><td>5</td><td><code>/api/textbook/chapters</code>、<code>/progress</code>、<code>/search</code></td></tr>
+<tr><td>真题模考</td><td>3</td><td><code>/api/real-exam/questions</code>、<code>/start</code></td></tr>
+<tr><td>考纲/打卡/学习会话</td><td>7</td><td><code>/api/syllabus/coverage</code>、<code>POST /api/checkin</code>、<code>/api/study-session</code></td></tr>
+</table>
+
+<!-- 四、前端模块 -->
+<h2 id="frontend">四、前端模块详解</h2>
+
+<p><strong>技术栈：</strong>React 18.3 + Vite 6 + react-router-dom 6.28（无 UI 框架，纯 CSS/SVG）</p>
+
+<h3>路由配置（21 条）</h3>
+<table>
+<tr><th>路径</th><th>组件</th><th>功能</th></tr>
+<tr><td><code>/</code></td><td>Dashboard</td><td>总览仪表盘</td></tr>
+<tr><td><code>/questions</code></td><td>QuestionBank</td><td>错题库</td></tr>
+<tr><td><code>/practice</code></td><td>Practice</td><td>练习</td></tr>
+<tr><td><code>/statistics</code></td><td>Statistics</td><td>统计</td></tr>
+<tr><td><code>/analysis</code></td><td>ErrorAnalysis</td><td>错题分析</td></tr>
+<tr><td><code>/exam</code></td><td>MockExam</td><td>模拟考试</td></tr>
+<tr><td><code>/real-exam</code></td><td>RealExam</td><td>真题模考</td></tr>
+<tr><td><code>/review</code></td><td>ReviewQueue</td><td>今日复习（SRS）</td></tr>
+<tr><td><code>/radar</code></td><td>AbilityRadar</td><td>能力雷达</td></tr>
+<tr><td><code>/diagnosis</code></td><td>ErrorDiagnosis</td><td>错题诊断</td></tr>
+<tr><td><code>/knowledge</code></td><td>KnowledgeGraph</td><td>知识图谱</td></tr>
+<tr><td><code>/textbook</code></td><td>Textbook</td><td>教材学习</td></tr>
+<tr><td><code>/learning-path</code></td><td>LearningPath</td><td>学习路径</td></tr>
+<tr><td><code>/plan</code></td><td>StudyPlan</td><td>学习计划</td></tr>
+<tr><td><code>/checkin</code></td><td>StudyCheckin</td><td>学习打卡</td></tr>
+<tr><td><code>/essay</code></td><td>EssayTraining</td><td>论文训练</td></tr>
+<tr><td><code>/case</code></td><td>CaseAnalysis</td><td>案例分析</td></tr>
+<tr><td><code>/notebook</code></td><td>Notebook</td><td>笔记</td></tr>
+<tr><td><code>/custom-questions</code></td><td>CustomQuestions</td><td>我的题库</td></tr>
+<tr><td><code>/syllabus</code></td><td>SyllabusCoverage</td><td>考纲覆盖</td></tr>
+<tr><td><code>/report</code></td><td>LearningReport</td><td>学习报告</td></tr>
+</table>
+
+<h3>API 封装：<code>src/utils/api.js</code></h3>
+<ul>
+    <li><code>API_BASE</code>：从 <code>VITE_API_BASE</code> 环境变量读取</li>
+    <li><code>fetchAPI(url, options)</code>：自动拼接 <code>user_id</code> 查询参数</li>
+    <li>导出 30+ 个具名 API 函数</li>
+</ul>
+
+<!-- 五、插件模块 -->
+<h2 id="plugin">五、浏览器插件模块详解</h2>
+
+<h3>manifest.json 关键配置</h3>
+<table>
+<tr><th>配置项</th><th>内容</th></tr>
+<tr><td>permissions</td><td>activeTab、scripting、storage、tabs、contextMenus、alarms</td></tr>
+<tr><td>host_permissions</td><td><code>*.ruankaodaren.com/*</code>、<code>localhost:5002/*</code></td></tr>
+<tr><td>content_scripts</td><td>注入 content.js 到 ruankaodaren.com（document_end）</td></tr>
+<tr><td>background</td><td>service_worker: background.js</td></tr>
+<tr><td>commands</td><td><code>Ctrl+Shift+C</code> 采集当前题目</td></tr>
+</table>
+
+<h3>文件职责</h3>
+<div class="feature-list">
+    <div class="feature-card">
+        <h4>content.js (~1200 行)</h4>
+        <p>DOM 采集核心：题目/选项/答案/解析/章节提取；批量采集；练习会话采集；SPA 导航监听；MutationObserver 自动采集。</p>
+        <span class="tag">collectCurrentQuestion</span>
+        <span class="tag">collectAllWrongQuestions</span>
+        <span class="tag">collectPracticeSession</span>
+    </div>
+    <div class="feature-card">
+        <h4>background.js (~640 行)</h4>
+        <p>Service Worker：user_id 管理、去重（dedupMap TTL 5min）、离线队列、重试、批量分片、互斥锁。</p>
+        <span class="tag">sendToBackend</span>
+        <span class="tag">sendBatchToBackend</span>
+        <span class="tag">processPendingQueue</span>
+    </div>
+    <div class="feature-card">
+        <h4>popup.html/js</h4>
+        <p>弹窗 UI：统计卡片、采集按钮、队列状态、会话历史、user_id 配置。</p>
+        <span class="tag">loadStats</span>
+        <span class="tag">collectSession</span>
+        <span class="tag">renderSessionHistory</span>
+    </div>
+</div>
+
+<h3>关键常量</h3>
+<table>
+<tr><th>常量</th><th>值</th><th>说明</th></tr>
+<tr><td><code>DEDUP_TTL</code></td><td>5 * 60 * 1000</td><td>5 分钟去重窗口</td></tr>
+<tr><td><code>MAX_RETRIES</code></td><td>3</td><td>单次发送重试次数</td></tr>
+<tr><td><code>ALARM_INTERVAL</code></td><td>0.5</td><td>30 秒重试周期（分钟）</td></tr>
+<tr><td><code>BATCH_CHUNK_SIZE</code></td><td>200</td><td>批量分片大小</td></tr>
+<tr><td><code>SESSION_HISTORY_LIMIT</code></td><td>50</td><td>会话历史上限</td></tr>
+<tr><td><code>PENDING_QUEUE_LIMIT</code></td><td>500</td><td>离线队列上限</td></tr>
+<tr><td><code>MAX_ITEM_RETRIES</code></td><td>10</td><td>死信阈值</td></tr>
+</table>
+
+<!-- 六、错题采集流 -->
+<h2 id="flow1">六、数据流图：错题采集流</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">错题采集完整时序图（从用户做题到入库展示）</div>
+    <div class="mermaid">
+sequenceDiagram
+    participant U as 用户
+    participant S as ruankaodaren.com
+    participant C as content.js
+    participant B as background.js
+    participant A as 后端 API
+    participant DB as SQLite
+
+    U->>S: 做题/查看错题
+    Note over C: 触发方式：<br/>1.popup按钮 2.Ctrl+Shift+C<br/>3.右键菜单 4.MutationObserver
+
+    U->>C: 触发采集
+    C->>C: findQuestionTitleElement()<br/>匹配 QUESTION_TITLE_SELECTORS
+    C->>C: extractQuestionText() 排除<br/>secondChapterName/breadcrumb
+    C->>C: extractOptions() 遍历 OPTION_ITEM_SELECTORS
+    C->>C: extractAnswers() extractAfterLabel<br/>兼容填空/判断/特殊字符
+    C->>C: generateQuestionId() 双 djb2 哈希
+
+    C->>B: sendMessage(sendToBackend, data)
+    B->>B: ensureInitialized() 等待 user_id
+    B->>B: isDuplicate(questionId) TTL 5min
+    alt 重复
+        B-->>C: success skipped
+    else 未重复
+        B->>A: POST /api/wrong-questions
+        alt 成功
+            A->>A: _upsert_wrong_question_record<br/>COALESCE 补全空字段
+            A->>DB: INSERT/UPDATE wrong_questions
+            A-->>B: 200 OK
+            B->>B: markSent(questionId)
+            B-->>C: success
+        else 失败
+            B->>B: addToPendingQueue(data, question)
+            B-->>C: queued
+        end
+    end
+    C-->>U: 采集结果通知
+    </div>
+</div>
+
+<!-- 七、练习会话流 -->
+<h2 id="flow2">七、数据流图：练习会话流</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">练习会话结果采集时序图（整套试卷成绩入库）</div>
+    <div class="mermaid">
+sequenceDiagram
+    participant U as 用户
+    participant C as content.js
+    participant B as background.js
+    participant A as 后端 API
+    participant DB as SQLite
+    participant P as popup.js
+
+    U->>P: 点击采集练习结果
+    P->>C: collectPracticeSession
+
+    C->>C: 提取 paper_name
+    C->>C: 从 main/#app 提取 summaryText
+    C->>C: 正则匹配 score/total/correct/wrong/time
+    C->>C: 合理性校验 total>500 to 0
+    C->>C: started_at 从 sessionStorage 取
+
+    C->>B: sendMessage(sendSession, data)
+    B->>B: ensureInitialized()
+    B->>A: POST /api/practice-sessions
+
+    A->>A: 字段范围校验<br/>correct in 0-total<br/>time in 0-600
+    A->>A: UPSERT 查询<br/>同 user_id+source_url 5min 内
+    alt 已存在
+        A->>DB: UPDATE practice_sessions
+        A-->>B: is_new false
+    else 新记录
+        A->>DB: INSERT practice_sessions
+        A-->>B: is_new true
+    end
+
+    B->>B: appendSessionHistory 上限50
+    B-->>P: success
+    P->>P: renderSessionHistory
+    P-->>U: 练习结果已保存
+    </div>
+</div>
+
+<!-- 八、统计分析流 -->
+<h2 id="flow3">八、数据流图：统计分析流</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">统计分析数据流（前端组件 → 后端聚合 → 数据库）</div>
+    <div class="mermaid">
+graph LR
+    subgraph 前端组件
+        D[Dashboard]
+        S[Statistics]
+        R[AbilityRadar]
+        EA[ErrorAnalysis]
+        Q[QuestionBank]
+    end
+
+    subgraph API封装
+        F[fetchAPI<br/>自动拼接 user_id]
+    end
+
+    subgraph 后端聚合查询
+        OV[get_stats_overview<br/>总数/已掌握/今日]
+        DY[get_stats_daily<br/>按日聚合]
+        CAT[get_stats_category<br/>COALESCE chapter,category]
+        CH[get_stats_chapter<br/>按 chapter 分组]
+        WP[get_stats_weak_points<br/>未掌握 TOP10]
+        COG[get_cognition_stats<br/>知识点掌握度]
+        DIST[error-analysis/distribution<br/>错因标签分布]
+    end
+
+    subgraph 数据库
+        WQ[(wrong_questions)]
+        UC[(user_cognition)]
+        KP[(knowledge_points)]
+        ET[(question_error_tags)]
+    end
+
+    D --> F
+    S --> F
+    R --> F
+    EA --> F
+    Q --> F
+
+    F --> OV
+    F --> DY
+    F --> CAT
+    F --> CH
+    F --> WP
+    F --> COG
+    F --> DIST
+
+    OV --> WQ
+    DY --> WQ
+    CAT --> WQ
+    CH --> WQ
+    WP --> WQ
+    COG --> UC
+    COG --> KP
+    DIST --> ET
+    </div>
+</div>
+
+<!-- 九、离线队列流 -->
+<h2 id="flow4">九、数据流图：离线队列容错流</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">离线队列容错机制流程图（失败 → 入队 → 重试 → 死信）</div>
+    <div class="mermaid">
+flowchart TD
+    START([发送失败/网络异常]) --> ADD[addToPendingQueue<br/>data + type + queue_id]
+    ADD --> CHECK_LEN{队列长度 ≥ 500?}
+    CHECK_LEN -->|是| DROP[丢弃最旧条目并告警]
+    CHECK_LEN -->|否| DEDUP{同 question_id<br/>已在队列?}
+    DEDUP -->|是| UPDATE_TS[更新 timestamp<br/>不重复插入]
+    DEDUP -->|否| PUSH[push 到队列末尾]
+    DROP --> STORAGE
+    UPDATE_TS --> STORAGE
+    PUSH --> STORAGE[(chrome.storage.local<br/>pending_queue)]
+
+    ALARM[chrome.alarms<br/>每 30 秒触发] --> PROCESS[processPendingQueue]
+    RETRY[popup 重试按钮] --> PROCESS
+
+    PROCESS --> LOCK{isProcessingQueue<br/>互斥锁?}
+    LOCK -->|占用中| SKIP[跳过本次]
+    LOCK -->|空闲| ITER[遍历队列]
+
+    ITER --> ITEM{队列项类型}
+    ITEM -->|question| SEND_Q[sendToBackend<br/>skipDedup skipQueueOnFail]
+    ITEM -->|session| SEND_S[sendSessionToBackend<br/>skipQueueOnFail skipHistoryOnFail]
+
+    SEND_Q --> RESULT{成功?}
+    SEND_S --> RESULT
+
+    RESULT -->|成功| RM[removeFromPendingQueueById<br/>逐条原子删除]
+    RESULT -->|失败| INC[retryCount + 1<br/>updateQueueItem]
+    INC --> LIMIT{retryCount ≥ 10?}
+    LIMIT -->|是| DEAD[移除死信并告警]
+    LIMIT -->|否| KEEP[保留队列等待重试]
+
+    RM --> DONE([处理完成])
+    DEAD --> DONE
+    KEEP --> DONE
+    </div>
+</div>
+
+<!-- 十、数据库 ER 图 -->
+<h2 id="er">十、数据库 ER 图</h2>
+
+<div class="diagram-box">
+    <div class="diagram-title">27 张表的关系图（核心表字段与外键关联）</div>
+    <div class="mermaid">
+erDiagram
+    knowledge_points ||--o{ user_cognition : "kp_id"
+    knowledge_points ||--o{ question_mapping : "kp_id"
+    knowledge_points ||--o{ daily_tasks : "kp_id"
+    knowledge_points ||--o{ flashcards : "kp_id"
+    knowledge_points ||--o{ notes : "kp_id"
+    knowledge_points ||--o{ real_exam_questions : "kp_id"
+    knowledge_points ||--o{ custom_questions : "kp_id"
+    knowledge_points ||--o{ mock_exam_questions : "kp_id"
+    knowledge_points }o--|| knowledge_points : "parent_id"
+
+    study_plans ||--o{ daily_tasks : "plan_id"
+    mock_exams ||--o{ mock_exam_questions : "exam_id"
+    practice_attempts ||--o{ practice_reflections : "attempt_id"
+    error_patterns ||--o{ practice_attempts : "error_pattern_id"
+    wrong_questions ||--o{ question_error_tags : "question_id"
+    error_tags ||--o{ question_error_tags : "tag_id"
+    textbook_chapters ||--o{ reading_progress : "chapter_id"
+    textbook_chapters }o--|| textbook_chapters : "parent_id"
+    essay_topics ||--o{ essay_submissions : "topic_id"
+    case_questions ||--o{ case_submissions : "case_id"
+
+    wrong_questions {
+        TEXT question_id PK
+        TEXT user_id
+        TEXT question
+        TEXT chapter
+        TEXT correct_answer
+        INTEGER is_mastered
+        INTEGER srs_stage
+        DATETIME next_review_time
+        INTEGER wrong_count
+    }
+
+    practice_sessions {
+        INTEGER id PK
+        TEXT user_id
+        TEXT source_url
+        TEXT paper_name
+        INTEGER total_questions
+        REAL score
+        REAL accuracy
+        INTEGER time_spent
+    }
+
+    knowledge_points {
+        INTEGER id PK
+        TEXT name
+        TEXT chapter
+        INTEGER parent_id
+        INTEGER level
+        REAL exam_weight
+        INTEGER is_active
+    }
+
+    user_cognition {
+        INTEGER id PK
+        INTEGER kp_id
+        TEXT user_id
+        REAL mastery_score
+        REAL stability
+    }
+
+    flashcards {
+        INTEGER id PK
+        TEXT user_id
+        INTEGER kp_id
+        TEXT front
+        TEXT back
+        INTEGER srs_stage
+        DATETIME next_review_at
+    }
+
+    mock_exams {
+        INTEGER id PK
+        TEXT user_id
+        TEXT title
+        TEXT status
+        REAL score
+    }
+
+    study_plans {
+        INTEGER id PK
+        TEXT user_id
+        DATE exam_date
+        TEXT status
+    }
+
+    daily_tasks {
+        INTEGER id PK
+        INTEGER plan_id
+        TEXT user_id
+        DATE task_date
+        TEXT status
+        INTEGER kp_id
+    }
+    </div>
+</div>
+
+<div class="note">
+    <strong>多用户隔离：</strong>18 张表含 <code>user_id</code> 字段（默认 <code>default_user</code>），前端/插件每次请求自动拼接 <code>?user_id=xxx</code>，后端 <code>get_user_id()</code> 解析并 sanitize。<br>
+    <strong>状态字段：</strong><code>is_mastered</code>（错题掌握）、<code>is_active</code>（知识点启用）、<code>status</code>（计划/任务/考试/论文等状态机）。
+</div>
+
+<!-- 十一、关键架构特征 -->
+<h2 id="features">十一、关键架构特征</h2>
+
+<div class="feature-list">
+    <div class="feature-card">
+        <h4>双层去重与容错</h4>
+        <p><strong>dedupMap</strong>（内存+storage，TTL 5min）：isDuplicate 只读检查，markSent 成功后标记，unmarkSent 失败时清除。</p>
+        <p><strong>pending_queue</strong>（storage，上限 500）：按 question_id 去重，逐条原子删除，retryCount + 死信移除，isProcessingQueue 互斥锁。</p>
+    </div>
+    <div class="feature-card">
+        <h4>SRS 间隔重复算法</h4>
+        <p>固定间隔序列：<code>[1, 2, 4, 7, 15, 30, 60, 120]</code> 天</p>
+        <p>wrong_questions.srs_stage → next_review_time → ReviewQueue 消费</p>
+        <p>flashcards.srs_stage → next_review_at → calculate_next_review()</p>
+    </div>
+    <div class="feature-card">
+        <h4>UPSERT 数据合并</h4>
+        <p>错题基于 <code>question_id + user_id</code> 去重，UPDATE 时用 <code>COALESCE(NULLIF(?, ''), field)</code> 补全空字段，wrong_count/error_count 累加。</p>
+        <p>练习会话基于 <code>user_id + source_url + 5分钟窗口</code> 去重。</p>
+    </div>
+    <div class="feature-card">
+        <h4>章节聚合兼容查询</h4>
+        <p>R25 后章节名存入 <code>chapter</code> 列，<code>category</code> 改为题型分类。所有分析接口使用 <code>COALESCE(NULLIF(chapter, ''), category)</code> 兼容新旧数据。</p>
+    </div>
+    <div class="feature-card">
+        <h4>单文件后端架构</h4>
+        <p>app.py ~6500 行，包含全部路由、建表、业务逻辑、种子数据。<code>ensure_schema()</code> 含动态 <code>ALTER TABLE</code> 兼容旧库迁移。</p>
+    </div>
+    <div class="feature-card">
+        <h4>无图表库依赖</h4>
+        <p>前端仅依赖 react + react-router-dom，图表（AbilityRadar、Statistics 等）使用纯 CSS/SVG 实现，体积小、可控性强。</p>
+    </div>
+</div>
+
+<h3>UPSERT SQL 示例</h3>
+<pre><code>-- 错题 UPSERT（基于 question_id + user_id）
+UPDATE wrong_questions
+SET correct_answer = COALESCE(NULLIF(?, ''), correct_answer),
+    options = CASE WHEN ? NOT IN ('', '[]') AND (options IS NULL OR options = '[]')
+                  THEN ? ELSE options END,
+    analysis = COALESCE(NULLIF(?, ''), analysis),
+    chapter = COALESCE(NULLIF(?, ''), chapter),
+    wrong_count = wrong_count + 1,
+    error_count = error_count + 1
+WHERE question_id = ? AND user_id = ?
+
+-- 练习会话 UPSERT（基于 user_id + source_url + 5分钟窗口）
+SELECT id FROM practice_sessions
+WHERE user_id = ? AND source_url = ?
+  AND created_at >= datetime('now', '-5 minutes')</code></pre>
+
+<div class="footer">
+    <p>软考错题分析系统 · 项目架构与数据流文档 · 生成于 2026-07-05</p>
+    <p>100 API · 27 表 · 21 前端路由 · 25 React 组件 · 5 插件文件</p>
+</div>
+
+</div>
+
+<script>
+mermaid.initialize({
+    startOnLoad: true,
+    theme: 'default',
+    themeVariables: {
+        primaryColor: '#3498db',
+        primaryTextColor: '#fff',
+        primaryBorderColor: '#2980b9',
+        lineColor: '#7f8c8d',
+        secondaryColor: '#eaf2f8',
+        tertiaryColor: '#f8f9fa',
+        fontFamily: '"PingFang SC", "Microsoft YaHei", sans-serif'
+    },
+    flowchart: {
+        useMaxWidth: true,
+        htmlLabels: true,
+        curve: 'basis'
+    },
+    sequence: {
+        useMaxWidth: true,
+        wrap: true
+    },
+    er: {
+        useMaxWidth: true
+    }
+});
+</script>
+</body>
+</html>

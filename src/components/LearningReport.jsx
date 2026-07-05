@@ -223,8 +223,8 @@ function LearningReport() {
                 key={idx}
                 style={{
                   padding: '0.4rem 0.9rem',
-                  background: '#fee2e2',
-                  color: '#ef4444',
+                  background: '#ffebee',
+                  color: '#f44336',
                   borderRadius: '16px',
                   fontSize: '0.85rem',
                   fontWeight: 500

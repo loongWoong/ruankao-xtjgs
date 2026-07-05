@@ -311,7 +311,7 @@ function QuestionBank() {
                           </span>
                         )}
                         {q.wrong_count > 1 && (
-                          <span style={{ fontSize: '0.7rem', color: '#f44336', background: '#fee2e2', padding: '0.1rem 0.4rem', borderRadius: '4px' }} title="累计错误次数">
+                          <span style={{ fontSize: '0.7rem', color: '#f44336', background: '#ffebee', padding: '0.1rem 0.4rem', borderRadius: '4px' }} title="累计错误次数">
                             ❌ {q.wrong_count}
                           </span>
                         )}

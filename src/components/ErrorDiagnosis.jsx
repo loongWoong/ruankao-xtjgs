@@ -4,9 +4,9 @@ import { Link } from 'react-router-dom';
 
 const CATEGORY_INFO = {
   concept: { label: '概念类', color: '#667eea', bgColor: '#eef1ff', icon: '🧠' },
-  memory: { label: '记忆类', color: '#f59e0b', bgColor: '#fef3c7', icon: '📝' },
-  calculation: { label: '计算类', color: '#ef4444', bgColor: '#fee2e2', icon: '🔢' },
-  reading: { label: '审题类', color: '#10b981', bgColor: '#d1fae5', icon: '👀' },
+  memory: { label: '记忆类', color: '#ff9800', bgColor: '#fff3e0', icon: '📝' },
+  calculation: { label: '计算类', color: '#f44336', bgColor: '#ffebee', icon: '🔢' },
+  reading: { label: '审题类', color: '#4caf50', bgColor: '#e8f5e9', icon: '👀' },
   logic: { label: '逻辑类', color: '#8b5cf6', bgColor: '#ede9fe', icon: '🔗' }
 };
 
@@ -58,24 +58,24 @@ function ErrorDiagnosis() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">已掌握</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>{overview.mastered || 0}</div>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>{overview.mastered || 0}</div>
           <div className="stat-card-sub">{overview.mastered_rate || 0}%</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">待攻克</div>
-          <div className="stat-card-value" style={{ color: '#ef4444' }}>{overview.pending || 0}</div>
+          <div className="stat-card-value" style={{ color: '#f44336' }}>{overview.pending || 0}</div>
           <div className="stat-card-sub">未掌握</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">平均错误次数</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{overview.avg_wrong_per_q || 0}</div>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>{overview.avg_wrong_per_q || 0}</div>
           <div className="stat-card-sub">次/题</div>
         </div>
       </div>
 
       {/* 诊断建议 */}
       {report.suggestions && report.suggestions.length > 0 && (
-        <div className="section-card" style={{ background: '#fef3c7', border: '1px solid #fde68a' }}>
+        <div className="section-card" style={{ background: '#fff3e0', border: '1px solid #fde68a' }}>
           <h3 className="section-title"><span>💡</span>诊断建议</h3>
           {report.suggestions.map((s, idx) => (
             <div key={idx} style={{ padding: '0.75rem', background: '#fff', borderRadius: '6px', marginBottom: '0.5rem' }}>
@@ -152,7 +152,7 @@ function ErrorDiagnosis() {
                     <td style={{ padding: '0.6rem' }}>{ch.category}</td>
                     <td style={{ padding: '0.6rem' }}>{ch.total}</td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: ch.pending > 0 ? '#ef4444' : '#10b981', fontWeight: 600 }}>{ch.pending}</span>
+                      <span style={{ color: ch.pending > 0 ? '#f44336' : '#4caf50', fontWeight: 600 }}>{ch.pending}</span>
                     </td>
                     <td style={{ padding: '0.6rem', color: '#888' }}>{ch.avg_wrong_count ? ch.avg_wrong_count.toFixed(1) : 0}</td>
                   </tr>
@@ -173,9 +173,9 @@ function ErrorDiagnosis() {
             <div key={q.id} style={{ padding: '0.75rem', borderBottom: '1px solid #f0f0f0', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
               <div style={{ flex: 1 }}>
                 <div style={{ display: 'flex', gap: '0.5rem', marginBottom: '0.3rem' }}>
-                  <span style={{ color: '#ef4444', fontWeight: 600 }}>#{idx + 1}</span>
+                  <span style={{ color: '#f44336', fontWeight: 600 }}>#{idx + 1}</span>
                   {q.category && <span style={{ background: '#f0f0f0', color: '#666', padding: '2px 8px', borderRadius: '4px', fontSize: '0.75rem' }}>{q.category}</span>}
-                  <span style={{ color: '#ef4444', fontSize: '0.8rem' }}>错 {q.wrong_count} 次</span>
+                  <span style={{ color: '#f44336', fontSize: '0.8rem' }}>错 {q.wrong_count} 次</span>
                 </div>
                 <div style={{ color: '#333' }}>{q.question ? (q.question.length > 80 ? q.question.slice(0, 80) + '...' : q.question) : '（无内容）'}</div>
               </div>

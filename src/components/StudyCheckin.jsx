@@ -167,7 +167,7 @@ function StudyCheckin() {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-card-title">当前连续</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{streak.current_streak || 0}</div>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>{streak.current_streak || 0}</div>
           <div className="stat-card-sub">天 🔥</div>
         </div>
         <div className="stat-card">
@@ -182,7 +182,7 @@ function StudyCheckin() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">累计时长</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>{formatMinutes(streak.total_study_minutes || 0)}</div>
+          <div className="stat-card-value" style={{ color: '#4caf50' }}>{formatMinutes(streak.total_study_minutes || 0)}</div>
           <div className="stat-card-sub">总学习时长</div>
         </div>
       </div>
@@ -191,7 +191,7 @@ function StudyCheckin() {
         <h3 className="section-title">
           <span>✅</span>今日打卡
           {today.checked_in && (
-            <span style={{ marginLeft: 'auto', fontSize: '0.85rem', color: '#10b981', fontWeight: 600 }}>
+            <span style={{ marginLeft: 'auto', fontSize: '0.85rem', color: '#4caf50', fontWeight: 600 }}>
               ✓ 今日已打卡
             </span>
           )}
@@ -271,7 +271,7 @@ function StudyCheckin() {
           </div>
           <div className="stat-card">
             <div className="stat-card-title">日均</div>
-            <div className="stat-card-value" style={{ color: '#10b981' }}>{sessionStats.avg_minutes_per_day || 0}</div>
+            <div className="stat-card-value" style={{ color: '#4caf50' }}>{sessionStats.avg_minutes_per_day || 0}</div>
             <div className="stat-card-sub">分钟/天</div>
           </div>
         </div>

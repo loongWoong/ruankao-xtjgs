@@ -10,8 +10,8 @@ import {
 } from '../utils/api.js';
 
 const STATUS_MAP = {
-  draft: { label: '草稿', color: '#6b7280', bg: '#f3f4f6' },
-  submitted: { label: '已提交', color: '#10b981', bg: '#d1fae5' }
+  draft: { label: '草稿', color: '#6b7280', bg: '#fafafa' },
+  submitted: { label: '已提交', color: '#4caf50', bg: '#e8f5e9' }
 };
 
 function EssayTraining() {

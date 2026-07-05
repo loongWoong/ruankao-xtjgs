@@ -49,7 +49,7 @@ function Statistics() {
       <h1 className="page-title">统计分析</h1>
 
       {error && (
-        <div className="error-banner" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#fee2e2', color: '#dc2626', borderRadius: '6px', cursor: 'pointer' }} onClick={() => setError(null)}>
+        <div className="error-banner" style={{ marginBottom: '1rem', padding: '0.75rem 1rem', background: '#ffebee', color: '#f44336', borderRadius: '6px', cursor: 'pointer' }} onClick={() => setError(null)}>
           {error} <span style={{ float: 'right' }}>点击关闭</span>
         </div>
       )}

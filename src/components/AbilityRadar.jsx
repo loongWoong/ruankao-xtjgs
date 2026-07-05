@@ -55,7 +55,7 @@ function AbilityRadar() {
     });
 
     const axes = ['覆盖率', '掌握度', '错题攻克率'];
-    const colors = ['#667eea', '#10b981', '#f59e0b'];
+    const colors = ['#667eea', '#4caf50', '#ff9800'];
 
     // 网格圆
     const gridRings = [];
@@ -161,8 +161,8 @@ function AbilityRadar() {
             fontSize: '0.85rem', color: '#555'
           }}>
             <div>平均覆盖率: <strong style={{ color: '#667eea' }}>{data.summary?.avg_coverage || 0}%</strong></div>
-            <div>平均掌握度: <strong style={{ color: '#10b981' }}>{data.summary?.avg_mastery || 0}%</strong></div>
-            <div>平均错题攻克率: <strong style={{ color: '#f59e0b' }}>{data.summary?.avg_wrong_mastered || 0}%</strong></div>
+            <div>平均掌握度: <strong style={{ color: '#4caf50' }}>{data.summary?.avg_mastery || 0}%</strong></div>
+            <div>平均错题攻克率: <strong style={{ color: '#ff9800' }}>{data.summary?.avg_wrong_mastered || 0}%</strong></div>
           </div>
         </div>
       </div>
@@ -217,23 +217,23 @@ function AbilityRadar() {
                     </td>
                     <td style={{ padding: '0.6rem', color: '#555' }}>{ch.visited_kps || 0}/{ch.total_kps || 0}</td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: (ch.coverage || 0) >= 80 ? '#10b981' : (ch.coverage || 0) >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
+                      <span style={{ color: (ch.coverage || 0) >= 80 ? '#4caf50' : (ch.coverage || 0) >= 50 ? '#667eea' : '#f44336', fontWeight: 600 }}>
                         {ch.coverage || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: (ch.mastery || 0) >= 80 ? '#10b981' : (ch.mastery || 0) >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
+                      <span style={{ color: (ch.mastery || 0) >= 80 ? '#4caf50' : (ch.mastery || 0) >= 50 ? '#667eea' : '#f44336', fontWeight: 600 }}>
                         {ch.mastery || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: (ch.wrong_mastered_rate || 0) >= 80 ? '#10b981' : (ch.wrong_mastered_rate || 0) >= 50 ? '#f59e0b' : '#ef4444', fontWeight: 600 }}>
+                      <span style={{ color: (ch.wrong_mastered_rate || 0) >= 80 ? '#4caf50' : (ch.wrong_mastered_rate || 0) >= 50 ? '#ff9800' : '#f44336', fontWeight: 600 }}>
                         {ch.wrong_mastered_rate || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
                       {(ch.pending_wrong || 0) > 0 ? (
-                        <span style={{ color: '#ef4444', fontWeight: 600 }}>{ch.pending_wrong}</span>
+                        <span style={{ color: '#f44336', fontWeight: 600 }}>{ch.pending_wrong}</span>
                       ) : (
                         <span style={{ color: '#ccc' }}>0</span>
                       )}

@@ -74,7 +74,7 @@ function WrongQuestionsAnalysis() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">近30天新增</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>
+          <div className="stat-card-value" style={{ color: '#ff9800' }}>
             {(analysisData.daily_stats || []).reduce((s, x) => s + (x.count || 0), 0)}
           </div>
           <div className="stat-card-sub">道</div>
