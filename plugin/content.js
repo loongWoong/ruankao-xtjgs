@@ -760,6 +760,7 @@ async function collectAllWrongQuestions() {
             inserted: batchResult ? batchResult.inserted : 0,
             updated: batchResult ? batchResult.updated : 0,
             queued: batchResult ? batchResult.queued : 0,
+            errors: batchResult ? (batchResult.errors || []) : [],  // 透传后端 per-item 错误详情
             data: collectedQuestions
         };
     } catch (error) {

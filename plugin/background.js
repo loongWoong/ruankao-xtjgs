@@ -293,6 +293,7 @@ async function sendBatchToBackend(items) {
     let totalUpdated = 0;
     let totalFailed = 0;
     let totalQueued = 0;
+    let allErrors = [];  // 收集后端 per-item 错误详情，供 popup 展示
 
     // 分块发送
     for (let i = 0; i < uniqueItems.length; i += BATCH_CHUNK_SIZE) {
@@ -313,6 +314,10 @@ async function sendBatchToBackend(items) {
                     totalInserted += result.inserted || 0;
                     totalUpdated += result.updated || 0;
                     totalFailed += result.failed || 0;
+                    // 透传后端 per-item 错误详情（含 index + error message），供 popup 展示
+                    if (Array.isArray(result.errors) && result.errors.length > 0) {
+                        allErrors = allErrors.concat(result.errors);
+                    }
                     success = true;
                     // 批量发送成功后，标记 question_id 已发送并立即写盘
                     // （多 chunk 场景下，若延迟到循环外写盘，SW 在 chunk 间被 kill 会丢失标记）
@@ -349,7 +354,8 @@ async function sendBatchToBackend(items) {
         updated: totalUpdated,
         failed: totalFailed,
         queued: totalQueued,
-        skipped: items.length - uniqueItems.length
+        skipped: items.length - uniqueItems.length,
+        errors: allErrors.slice(0, 20)  // 最多透传 20 条错误详情
     };
 }
 

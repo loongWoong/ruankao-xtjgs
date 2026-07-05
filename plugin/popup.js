@@ -288,6 +288,7 @@ document.getElementById('collectAll').addEventListener('click', function() {
                         const inserted = response.inserted || 0;
                         const updated = response.updated || 0;
                         const queued = response.queued || 0;
+                        const errors = response.errors || [];
                         // 拆分展示：新增/更新/去重/离线队列/失败
                         let msg = `✓ 完成：共 ${total} 道`;
                         if (inserted > 0) msg += `，新增 ${inserted}`;
@@ -295,6 +296,12 @@ document.getElementById('collectAll').addEventListener('click', function() {
                         if (dedupedCount > 0) msg += `，去重 ${dedupedCount}`;
                         if (queued > 0) msg += `，离线队列 ${queued}`;
                         if (failCount > 0) msg += `，失败 ${failCount}`;
+                        // 展示前几条失败原因（来自后端 per-item errors）
+                        if (errors.length > 0) {
+                            const detail = errors.slice(0, 2).map(e => e.error || e.message || JSON.stringify(e)).join('；');
+                            msg += '。失败原因：' + detail.substring(0, 80);
+                            if (errors.length > 2) msg += '...';
+                        }
                         showStatus(msg, failCount > 0 ? 'info' : 'success');
                         loadStats();
                         loadPendingQueueCount();

@@ -108,7 +108,9 @@ def get_pagination_params():
     return page, limit
 
 def get_user_id():
-    return request.args.get('user_id', 'default_user') or 'default_user'
+    # GET 查询参数也需 sanitize，与 POST 路径保持一致
+    # 防止超长字符串、特殊字符导致与 POST 存储的值不匹配
+    return sanitize_string(request.args.get('user_id', 'default_user'), 100) or 'default_user'
 
 def safe_int(value, default=0):
     try:
@@ -2279,6 +2281,9 @@ def batch_add_wrong_questions():
                 q_id, is_new = _upsert_wrong_question_record(cursor, q_data, user_id)
                 if q_id is None:
                     failed += 1
+                    if len(errors) < 20:
+                        # _upsert 返回 None 通常是 question 文本为空或过短，记录原因便于调试
+                        errors.append({'index': idx, 'error': 'question 文本为空或过短，无法入库'})
                     continue
                 if is_new:
                     inserted += 1
@@ -2316,6 +2321,12 @@ def add_practice_session():
     correct_count = safe_int(data.get('correct_count', 0), 0)
     wrong_count = safe_int(data.get('wrong_count', 0), 0)
     time_spent = safe_int(data.get('time_spent', 0), 0)
+
+    # 范围校验：防止负数、超值污染统计（后端不可信任客户端）
+    total_questions = max(0, min(total_questions, 1000))  # 单套试卷不超过 1000 题
+    correct_count = max(0, min(correct_count, total_questions))  # 正确数不超过总数
+    wrong_count = max(0, min(wrong_count, total_questions))  # 错误数不超过总数
+    time_spent = max(0, min(time_spent, 600))  # 用时不超过 10 小时（36000 秒）
 
     # score/accuracy 允许浮点，做范围约束
     try:
