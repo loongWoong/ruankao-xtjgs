@@ -1841,11 +1841,12 @@ def get_task_detail(cursor, task):
 
 def calculate_daily_tasks(cursor, user_id, plan_id, start_date, kps_to_learn, daily_kp_target, daily_target):
     tasks = []
-    learned_kps = []
+    learned_kps = []  # [{kp_id, learned_day, next_review_day_idx}]
 
     total_days = max(1, (len(kps_to_learn) + daily_kp_target - 1) // daily_kp_target)
+    plan_horizon = min(total_days, 60)
 
-    for day_idx in range(min(total_days, 60)):
+    for day_idx in range(plan_horizon):
         current_date = start_date + timedelta(days=day_idx)
         date_str = current_date.strftime('%Y-%m-%d')
 
@@ -1861,11 +1862,21 @@ def calculate_daily_tasks(cursor, user_id, plan_id, start_date, kps_to_learn, da
                 'completed_count': 0,
                 'status': 'pending'
             })
-            learned_kps.append({'kp_id': kp['id'], 'learned_day': day_idx})
+            # 为新学的知识点计算第一次复习日（SRS_REVIEW_INTERVALS[0]=1 天后）
+            first_review_offset = SRS_REVIEW_INTERVALS[0] if SRS_REVIEW_INTERVALS else 1
+            learned_kps.append({
+                'kp_id': kp['id'],
+                'learned_day': day_idx,
+                'last_review_day_idx': day_idx,  # 上次复习/学习发生的 day_idx
+                'next_review_day_idx': day_idx + first_review_offset,
+                'review_stage': 0
+            })
 
-        for learned in learned_kps[:-len(new_kps)] if new_kps else learned_kps:
-            days_since_learn = day_idx - learned['learned_day']
-            if days_since_learn in SRS_REVIEW_INTERVALS:
+        # 仅对"今日到期"的知识点排一条复习任务，避免未来日期任务雪崩
+        for learned in learned_kps:
+            if learned['kp_id'] in {k['id'] for k in new_kps}:
+                continue  # 当天新学的不算复习
+            if learned['next_review_day_idx'] == day_idx:
                 tasks.append({
                     'plan_id': plan_id,
                     'user_id': user_id,
@@ -1876,6 +1887,15 @@ def calculate_daily_tasks(cursor, user_id, plan_id, start_date, kps_to_learn, da
                     'completed_count': 0,
                     'status': 'pending'
                 })
+                # 推进到下一个 SRS 间隔：相对上次复习日递增，而非相对学习日
+                next_stage = learned['review_stage'] + 1
+                if next_stage < len(SRS_REVIEW_INTERVALS):
+                    learned['next_review_day_idx'] = learned['last_review_day_idx'] + SRS_REVIEW_INTERVALS[next_stage]
+                    learned['last_review_day_idx'] = day_idx
+                    learned['review_stage'] = next_stage
+                else:
+                    # 已完成所有复习周期，不再排期
+                    learned['next_review_day_idx'] = -1
 
         practice_count = max(0, daily_target - len([t for t in tasks if t['task_date'] == date_str]) * 5)
         if practice_count > 0:
