@@ -82,80 +82,16 @@ function ErrorAnalysis() {
     } catch (err) {
       console.error('获取数据失败:', err);
       setError(err.message || '获取数据失败');
-      setDistribution(mockDistribution());
-      setTrend(mockTrend());
-      setRecommendations(mockRecommendations());
-      setWeakPoints(mockWeakPoints());
-      setStats({
-        total_wrong_questions: 86,
-        total_not_mastered: 42
-      });
+      // 不再使用 mock 数据掩盖真实问题，保持空数组让 UI 显示空状态
+      setDistribution([]);
+      setTrend([]);
+      setRecommendations([]);
+      setWeakPoints([]);
+      setStats({ total_wrong_questions: 0, total_not_mastered: 0 });
     } finally {
       setLoading(false);
     }
   };
-
-  const mockDistribution = () => [
-    { type: 'concept', name: '概念错误', count: 28 },
-    { type: 'memory', name: '记忆错误', count: 18 },
-    { type: 'calculation', name: '计算错误', count: 15 },
-    { type: 'reading', name: '审题错误', count: 12 },
-    { type: 'logic', name: '逻辑错误', count: 13 }
-  ];
-
-  const mockTrend = () => {
-    const data = [];
-    const today = new Date();
-    for (let i = 29; i >= 0; i--) {
-      const date = new Date(today);
-      date.setDate(date.getDate() - i);
-      data.push({
-        date: date.toISOString().split('T')[0],
-        error_count: Math.floor(Math.random() * 8) + 1
-      });
-    }
-    return data;
-  };
-
-  const mockRecommendations = () => [
-    {
-      id: 1,
-      type: '单选题',
-      content: '在数据库系统中，事务的ACID特性不包括以下哪一项？',
-      knowledge_point: '数据库事务',
-      reason: '概念错误高发，需强化理解',
-      error_count: 5
-    },
-    {
-      id: 2,
-      type: '多选题',
-      content: '以下哪些属于面向对象设计的基本原则？（多选）',
-      knowledge_point: '面向对象设计',
-      reason: '记忆混淆，建议对比学习',
-      error_count: 4
-    },
-    {
-      id: 3,
-      type: '单选题',
-      content: '某系统的可靠性模型为串联系统，三个部件的可靠度分别为0.9、0.8、0.7，则系统可靠度为？',
-      knowledge_point: '系统可靠性计算',
-      reason: '计算错误频发，需加强练习',
-      error_count: 3
-    }
-  ];
-
-  const mockWeakPoints = () => [
-    { name: '数据库事务管理', error_count: 12, mastery_rate: 35 },
-    { name: '面向对象设计原则', error_count: 10, mastery_rate: 42 },
-    { name: '系统架构设计模式', error_count: 9, mastery_rate: 45 },
-    { name: '算法复杂度分析', error_count: 8, mastery_rate: 50 },
-    { name: '网络协议与安全', error_count: 7, mastery_rate: 55 },
-    { name: '软件工程方法论', error_count: 6, mastery_rate: 58 },
-    { name: '操作系统进程调度', error_count: 6, mastery_rate: 60 },
-    { name: '数据结构与算法', error_count: 5, mastery_rate: 65 },
-    { name: '需求工程与建模', error_count: 5, mastery_rate: 68 },
-    { name: '系统性能优化', error_count: 4, mastery_rate: 72 }
-  ];
 
   const handleBatchAnalyze = async () => {
     try {
@@ -273,6 +209,12 @@ function ErrorAnalysis() {
       <div className="ea-main-grid">
         <div className="section-card">
           <h2 className="section-title">📊 错误类型分布</h2>
+          {distribution.length === 0 ? (
+            <div className="empty-state" style={{ padding: '2rem', color: '#999' }}>
+              <div className="empty-state-icon">📭</div>
+              <div>暂无错题分类数据，去练习积累错题吧</div>
+            </div>
+          ) : (
           <div className="ea-distribution-content">
             <div className="ea-pie-chart">
               <svg viewBox="0 0 42 42" className="donut-svg">
@@ -319,8 +261,8 @@ function ErrorAnalysis() {
                 const percent = totalErrors > 0 ? ((count / totalErrors) * 100).toFixed(1) : 0;
                 const isSelected = selectedCategory === type;
                 return (
-                  <div 
-                    key={i} 
+                  <div
+                    key={i}
                     className={`ea-legend-item ${isSelected ? 'active' : ''}`}
                     onClick={() => setSelectedCategory(isSelected ? null : type)}
                   >
@@ -333,6 +275,7 @@ function ErrorAnalysis() {
               })}
             </div>
           </div>
+          )}
         </div>
 
         <div className="section-card">
@@ -343,6 +286,12 @@ function ErrorAnalysis() {
             </span>
           </h2>
           <div className="ea-trend-chart">
+            {trend.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem', color: '#999' }}>
+                暂无错误趋势数据
+              </div>
+            ) : (
+            <>
             <div className="ea-trend-bars">
               {trend.map((day, index) => {
                 const count = day.total_errors || day.error_count || day.count || 0;
@@ -362,13 +311,19 @@ function ErrorAnalysis() {
               <span>{trend[Math.floor(trend.length / 2)]?.date?.slice(5) || ''}</span>
               <span>{trend[trend.length - 1]?.date?.slice(5) || ''}</span>
             </div>
+            </>
+            )}
           </div>
         </div>
 
         <div className="section-card">
           <h2 className="section-title">🎯 薄弱知识点 TOP10</h2>
           <div className="ea-weak-list">
-            {weakPoints.map((wp, index) => (
+            {weakPoints.length === 0 ? (
+              <div className="empty-state" style={{ padding: '2rem', color: '#999' }}>
+                暂无薄弱知识点数据
+              </div>
+            ) : weakPoints.map((wp, index) => (
               <div key={index} className="ea-weak-item">
                 <div className="ea-weak-rank" style={{ background: index < 3 ? `linear-gradient(135deg, ${['#ff6b6b', '#ffa502', '#ffd93d'][index]} 0%, ${['#ff4757', '#ff7f50', '#ffbe0b'][index]} 100%)` : 'linear-gradient(135deg, #667eea 0%, #764ba2 100%)' }}>
                   {index + 1}
@@ -403,7 +358,11 @@ function ErrorAnalysis() {
           基于你的错题分析，智能推荐以下练习题目
         </p>
         <div className="ea-recommend-list">
-          {recommendations.map((rec, index) => (
+          {recommendations.length === 0 ? (
+            <div className="empty-state" style={{ padding: '2rem', color: '#999' }}>
+              暂无推荐练习，多做错题后会有针对性推荐
+            </div>
+          ) : recommendations.map((rec, index) => (
             <div key={index} className="ea-recommend-card">
               <div className="ea-recommend-header">
                 <span className="ea-recommend-type">{rec.type}</span>
