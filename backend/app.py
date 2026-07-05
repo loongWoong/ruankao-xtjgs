@@ -2297,10 +2297,17 @@ def update_wrong_question(question_id):
 @app.route('/api/wrong-questions/<int:question_id>', methods=['DELETE'])
 @api_response
 def delete_wrong_question(question_id):
+    user_id = get_user_id()
     with get_db_conn() as conn:
         cursor = conn.cursor()
+        # 先校验题目存在且属于当前用户，避免误删返回 success
+        cursor.execute('SELECT id FROM wrong_questions WHERE id = ? AND user_id = ?', (question_id, user_id))
+        if cursor.fetchone() is None:
+            return jsonify({'error': '错题不存在或无权删除', 'code': 'NOT_FOUND'}), 404
         cursor.execute('DELETE FROM wrong_questions WHERE id = ?', (question_id,))
         cursor.execute('DELETE FROM question_mapping WHERE question_id = ?', (question_id,))
+        cursor.execute('DELETE FROM practice_attempts WHERE question_id = ?', (question_id,))
+        cursor.execute('DELETE FROM practice_reflections WHERE question_id = ?', (question_id,))
         conn.commit()
     return jsonify({'success': True})
 

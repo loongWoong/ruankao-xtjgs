@@ -100,6 +100,9 @@ function StudyPlan() {
   };
 
   const handleRegenerate = async () => {
+    if (!window.confirm('重新生成将清空当前今日任务及未来排程，已完成的任务记录会保留，是否继续？')) {
+      return;
+    }
     setSubmitting(true);
     setError(null);
     try {

@@ -73,6 +73,7 @@ const NoteTab = () => {
   const [tagsInput, setTagsInput] = useState('');
   const [isFavorite, setIsFavorite] = useState(false);
   const [isEditing, setIsEditing] = useState(false);
+  const [deleting, setDeleting] = useState(false);
 
   const fetchNotes = async () => {
     setLoading(true);
@@ -142,14 +143,18 @@ const NoteTab = () => {
   };
 
   const handleDelete = async () => {
-    if (!selectedNote) return;
+    if (!selectedNote || deleting) return;
     if (!confirm('确定要删除这篇笔记吗？')) return;
+    setDeleting(true);
     try {
       await deleteNote(selectedNote.id);
       setSelectedNote(null);
       fetchNotes();
     } catch (err) {
       console.error('删除笔记失败:', err);
+      alert('删除笔记失败：' + (err.message || '未知错误'));
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -283,8 +288,8 @@ const NoteTab = () => {
                   </button>
                 )}
                 {selectedNote && (
-                  <button className="btn btn-danger" onClick={handleDelete}>
-                    删除
+                  <button className="btn btn-danger" onClick={handleDelete} disabled={deleting}>
+                    {deleting ? '删除中...' : '删除'}
                   </button>
                 )}
               </div>
