@@ -58,7 +58,13 @@ function RealExam() {
     // 使用时间戳差值，避免浏览器后台/休眠时 setInterval 节流导致倒计时不准
     const timer = setInterval(() => {
       if (examEndAt > 0) {
-        setTimeLeft(Math.max(0, Math.floor((examEndAt - Date.now()) / 1000)));
+        const remaining = Math.max(0, Math.floor((examEndAt - Date.now()) / 1000));
+        setTimeLeft(remaining);
+        // 倒计时归零时在回调内立即触发自动提交，避免依赖 useEffect 重新执行
+        if (remaining <= 0) {
+          clearInterval(timer);
+          handleSubmitExam();
+        }
       }
     }, 1000);
     return () => clearInterval(timer);
@@ -366,7 +372,13 @@ function RealExam() {
   );
 
   const renderExamView = () => {
-    if (!examData || examQuestions.length === 0) return <div className="loading">加载题目中...</div>;
+    if (!examData || examQuestions.length === 0) return (
+      <div className="empty-state">
+        <div className="empty-state-icon">📭</div>
+        <p>暂无题目数据，请返回列表重新选择</p>
+        <button className="btn btn-primary" style={{ marginTop: '1rem' }} onClick={handleBackToList}>返回列表</button>
+      </div>
+    );
     const q = examQuestions[currentIndex];
     let options = q.options;
     if (typeof options === 'string') {
