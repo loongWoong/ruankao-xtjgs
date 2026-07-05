@@ -12,7 +12,7 @@ function StudyCheckin() {
   const [error, setError] = useState(null);
   const [streak, setStreak] = useState({ current_streak: 0, longest_streak: 0, total_checkin_days: 0, total_study_minutes: 0 });
   const [today, setToday] = useState({ checked_in: false, study_minutes: 0, note: '' });
-  const [calendarMonth, setCalendarMonth] = useState(new Date().toISOString().slice(0, 7));
+  const [calendarMonth, setCalendarMonth] = useState(new Date().toLocaleDateString('en-CA').slice(0, 7));
   const [calendar, setCalendar] = useState([]);
   const [sessionStats, setSessionStats] = useState({ total_minutes: 0, active_days: 0, avg_minutes_per_day: 0, by_module: [] });
   const [checkinMinutes, setCheckinMinutes] = useState(60);
@@ -39,8 +39,8 @@ function StudyCheckin() {
         getCheckinStreak(),
         getTodayCheckin()
       ]);
-      setStreak(streakData);
-      setToday(todayData);
+      setStreak(prev => ({ ...prev, ...streakData }));
+      setToday(prev => ({ ...prev, ...todayData }));
       if (todayData.checked_in !== false) {
         setCheckinMinutes(todayData.study_minutes || 60);
         setCheckinNote(todayData.note || '');
@@ -64,7 +64,7 @@ function StudyCheckin() {
   const loadSessionStats = async () => {
     try {
       const data = await getStudySessionStats(statsDays);
-      setSessionStats(data);
+      setSessionStats(prev => ({ ...prev, ...data }));
     } catch (e) {
       console.error('加载时长统计失败', e);
     }
@@ -84,9 +84,11 @@ function StudyCheckin() {
         study_minutes: minutes,
         note: checkinNote
       });
-      setStreak(prev => ({ ...prev, current_streak: data.streak, total_checkin_days: data.total_days, total_study_minutes: data.total_minutes }));
+      setStreak(prev => ({ ...prev, current_streak: data.streak, total_checkin_days: data.total_days, total_study_minutes: data.total_minutes, longest_streak: data.longest_streak || prev.longest_streak }));
       setToday({ checked_in: true, study_minutes: minutes, note: checkinNote });
       loadCalendar();
+      // 打卡成功后刷新学习时长统计，避免"总时长""活跃天数"不更新
+      loadSessionStats();
     } catch (e) {
       setError(e.message || '打卡失败');
     } finally {
@@ -165,22 +167,22 @@ function StudyCheckin() {
       <div className="stats-grid">
         <div className="stat-card">
           <div className="stat-card-title">当前连续</div>
-          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{streak.current_streak}</div>
+          <div className="stat-card-value" style={{ color: '#f59e0b' }}>{streak.current_streak || 0}</div>
           <div className="stat-card-sub">天 🔥</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">最长连续</div>
-          <div className="stat-card-value">{streak.longest_streak}</div>
+          <div className="stat-card-value">{streak.longest_streak || 0}</div>
           <div className="stat-card-sub">天</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">累计打卡</div>
-          <div className="stat-card-value" style={{ color: '#667eea' }}>{streak.total_checkin_days}</div>
+          <div className="stat-card-value" style={{ color: '#667eea' }}>{streak.total_checkin_days || 0}</div>
           <div className="stat-card-sub">天</div>
         </div>
         <div className="stat-card">
           <div className="stat-card-title">累计时长</div>
-          <div className="stat-card-value" style={{ color: '#10b981' }}>{formatMinutes(streak.total_study_minutes)}</div>
+          <div className="stat-card-value" style={{ color: '#10b981' }}>{formatMinutes(streak.total_study_minutes || 0)}</div>
           <div className="stat-card-sub">总学习时长</div>
         </div>
       </div>
@@ -233,6 +235,7 @@ function StudyCheckin() {
             <input
               type="month"
               value={calendarMonth}
+              max={new Date().toLocaleDateString('en-CA').slice(0, 7)}
               onChange={e => setCalendarMonth(e.target.value)}
               style={{ border: '1px solid #ddd', borderRadius: '4px', padding: '0.25rem' }}
             />
@@ -259,21 +262,21 @@ function StudyCheckin() {
         <div className="stats-grid" style={{ marginBottom: '1rem' }}>
           <div className="stat-card">
             <div className="stat-card-title">总时长</div>
-            <div className="stat-card-value">{formatMinutes(sessionStats.total_minutes)}</div>
+            <div className="stat-card-value">{formatMinutes(sessionStats.total_minutes || 0)}</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-title">活跃天数</div>
-            <div className="stat-card-value" style={{ color: '#667eea' }}>{sessionStats.active_days}</div>
+            <div className="stat-card-value" style={{ color: '#667eea' }}>{sessionStats.active_days || 0}</div>
             <div className="stat-card-sub">/ {statsDays} 天</div>
           </div>
           <div className="stat-card">
             <div className="stat-card-title">日均</div>
-            <div className="stat-card-value" style={{ color: '#10b981' }}>{sessionStats.avg_minutes_per_day}</div>
+            <div className="stat-card-value" style={{ color: '#10b981' }}>{sessionStats.avg_minutes_per_day || 0}</div>
             <div className="stat-card-sub">分钟/天</div>
           </div>
         </div>
 
-        {sessionStats.by_module && sessionStats.by_module.length > 0 && (
+        {sessionStats.by_module && sessionStats.by_module.length > 0 ? (
           <div>
             <h4 style={{ marginBottom: '0.5rem', color: '#555' }}>按模块分布</h4>
             {sessionStats.by_module.map((m, idx) => {
@@ -283,7 +286,7 @@ function StudyCheckin() {
                 <div key={idx} style={{ marginBottom: '0.5rem' }}>
                   <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.85rem', marginBottom: '0.2rem' }}>
                     <span>{m.module || '未分类'}</span>
-                    <span style={{ color: '#888' }}>{formatMinutes(m.total_minutes)} ({m.cnt} 次)</span>
+                    <span style={{ color: '#888' }}>{formatMinutes(m.total_minutes || 0)} ({m.cnt || 0} 次)</span>
                   </div>
                   <div style={{ height: '6px', background: '#f0f0f0', borderRadius: '3px', overflow: 'hidden' }}>
                     <div style={{ width: `${pct}%`, height: '100%', background: '#667eea' }} />
@@ -291,6 +294,10 @@ function StudyCheckin() {
                 </div>
               );
             })}
+          </div>
+        ) : (
+          <div style={{ padding: '1rem', color: '#999', textAlign: 'center', fontSize: '0.85rem' }}>
+            暂无模块学习数据
           </div>
         )}
       </div>
