@@ -181,16 +181,24 @@ function collectCurrentQuestion() {
 }
 
 function generateQuestionId(questionText) {
-    let hash = 0;
-    const text = questionText.replace(/\s+/g, '').substring(0, 100);
-    for (let i = 0; i < text.length; i++) {
-        const char = text.charCodeAt(i);
-        hash = ((hash << 5) - hash) + char;
-        hash = hash & hash;
-    }
-    // 只基于题目文本哈希，不加 Date.now()，保证同一道题每次生成相同 ID
-    // 后端据此做 UPSERT 去重，避免重复采集
-    return 'q_' + Math.abs(hash);
+    // 使用双哈希降低碰撞概率：32 位 DJP 哈希约 4.6 万题有 50% 碰撞，
+    // 双哈希拼接（两个不同 seed）将碰撞空间扩大到 ~2^64，足够软考场景使用。
+    // 只基于题目文本，不加 Date.now()，保证同一道题每次生成相同 ID（后端 UPSERT 去重依赖）。
+    const text = questionText.replace(/\s+/g, '').substring(0, 200);
+
+    const djb2Hash = function(seed) {
+        let h = seed;
+        for (let i = 0; i < text.length; i++) {
+            const char = text.charCodeAt(i);
+            h = ((h << 5) + h) + char;  // h * 33 + char
+            h = h & h;  // 32 位
+        }
+        return Math.abs(h);
+    };
+
+    const h1 = djb2Hash(5381);
+    const h2 = djb2Hash(16777619);
+    return 'q_' + h1.toString(36) + '_' + h2.toString(36);
 }
 
 function findQuestionTitleElement() {

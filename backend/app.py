@@ -2138,6 +2138,12 @@ def _upsert_wrong_question_record(cursor, data, user_id=None):
     if not clean_question:
         return None, False
 
+    # question_id 为空时，基于 question 文本生成兜底 ID（避免每次 INSERT 无法去重）
+    if not clean_question_id:
+        import hashlib as _hashlib
+        _text = re.sub(r'\s+', '', clean_question)
+        clean_question_id = 'q_' + _hashlib.md5(_text.encode('utf-8')).hexdigest()[:16]
+
     # UPSERT 去重：基于 question_id + user_id 检查是否已存在
     existing_id = None
     if clean_question_id:
