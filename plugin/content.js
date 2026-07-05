@@ -45,12 +45,8 @@ const ANALYSIS_SELECTORS = [
     '[class*="answer-analysis"]'
 ];
 
-const QUESTION_CONTAINER_SELECTORS = [
-    '[class*="question"]',
-    '[class*="Question"]',
-    '[class*="item"]',
-    '[class*="card"]',
-    '[class*="exercise"]',
+// 精确容器选择器（用于 .closest() 定位单题容器，避免匹配到外层列表）
+const QUESTION_CONTAINER_PRECISE = [
     '.question-item',
     '.exercise-item',
     '.wrong-question-item',
@@ -58,7 +54,36 @@ const QUESTION_CONTAINER_SELECTORS = [
     '.exam-question',
     '[class*="question-item"]',
     '[class*="QuestionItem"]',
-    '[class*="wrong-question"]'
+    '[class*="wrong-question"]',
+    '[class*="exercise-item"]',
+    '[class*="ExamQuestion"]'
+];
+
+// 宽泛容器选择器（仅作回退，且会做包含关系去重）
+const QUESTION_CONTAINER_SELECTORS = [
+    '.question-item',
+    '.exercise-item',
+    '.wrong-question-item',
+    '.question-card',
+    '.exam-question',
+    '[class*="question-item"]',
+    '[class*="QuestionItem"]',
+    '[class*="wrong-question"]',
+    '[class*="exercise"]',
+    '[class*="card"]'
+];
+
+// 题干提取时应排除的类名（避免误取章节名/题型说明/面包屑等）
+const QUESTION_TEXT_EXCLUDE_CLASSES = [
+    'secondChapterName',
+    'breadcrumb',
+    'nav',
+    'question-type',
+    'question-number',
+    'questionType',
+    'questionNumber',
+    'question-meta',
+    'questionMeta'
 ];
 
 let currentQuestionHash = '';
@@ -185,16 +210,29 @@ function findQuestionTitleElement() {
 function extractQuestionText(questionElement) {
     let questionText = '';
 
+    // 判断子元素是否应被排除（基于类名）
+    const shouldExclude = function(el) {
+        try {
+            const cls = el.className || '';
+            if (typeof cls !== 'string') return false;
+            for (const excludeClass of QUESTION_TEXT_EXCLUDE_CLASSES) {
+                if (cls.includes(excludeClass)) return true;
+            }
+        } catch (e) {
+        }
+        return false;
+    };
+
     try {
         const children = questionElement.children;
         for (let i = 0; i < children.length; i++) {
             const child = children[i];
-            if (!child.className || !child.className.includes('secondChapterName')) {
-                const text = child.textContent.trim();
-                if (text && text.length > 10) {
-                    questionText = text;
-                    break;
-                }
+            if (shouldExclude(child)) continue;
+            const text = child.textContent.trim();
+            // 跳过过短文本（<10）和过长文本（>500，可能是选项/解析混入）
+            if (text && text.length >= 10 && text.length <= 500) {
+                questionText = text;
+                break;
             }
         }
     } catch (e) {
@@ -203,9 +241,9 @@ function extractQuestionText(questionElement) {
 
     if (!questionText) {
         try {
-            if (questionElement.firstElementChild) {
+            if (questionElement.firstElementChild && !shouldExclude(questionElement.firstElementChild)) {
                 const text = questionElement.firstElementChild.textContent.trim();
-                if (text && text.length > 10) {
+                if (text && text.length >= 10 && text.length <= 500) {
                     questionText = text;
                 }
             }
@@ -215,18 +253,27 @@ function extractQuestionText(questionElement) {
     }
 
     if (!questionText) {
+        // 第三级 fallback：不再取整个 textContent（会混入选项/答案），改为取直接子文本节点拼接
         try {
-            const text = questionElement.textContent.trim();
-            if (text && text.length > 10) {
-                questionText = text;
+            let directText = '';
+            for (let node of questionElement.childNodes) {
+                if (node.nodeType === Node.TEXT_NODE) {
+                    directText += node.textContent;
+                }
+            }
+            directText = directText.trim();
+            if (directText.length >= 10) {
+                questionText = directText;
             }
         } catch (e) {
-            console.warn('直接提取textContent失败:', e);
+            console.warn('提取直接文本节点失败:', e);
         }
     }
 
     if (questionText) {
+        // 净化：去除多余空白、前导题号（如 "1. " "第1题"）
         questionText = questionText.replace(/\s+/g, ' ').trim();
+        questionText = questionText.replace(/^(?:第?\d+[题.、:：]\s*)/, '');
     }
 
     return questionText;
@@ -514,6 +561,28 @@ function findQuestionTitleInElement(container) {
     return null;
 }
 
+// DOM 包含关系去重：若 A 包含 B（A 是 B 的祖先），则移除 A，保留更具体的 B
+function deduplicateByContainment(elements) {
+    const result = [];
+    for (let i = 0; i < elements.length; i++) {
+        const a = elements[i];
+        let isAncestor = false;
+        for (let j = 0; j < elements.length; j++) {
+            if (i === j) continue;
+            const b = elements[j];
+            // 若 a 包含 b 且 a !== b，则 a 是祖先，移除 a
+            if (a !== b && a.contains && a.contains(b)) {
+                isAncestor = true;
+                break;
+            }
+        }
+        if (!isAncestor) {
+            result.push(a);
+        }
+    }
+    return result;
+}
+
 async function collectAllWrongQuestions() {
     try {
         console.log('开始采集所有可见错题');
@@ -526,13 +595,19 @@ async function collectAllWrongQuestions() {
                 for (const titleEl of titleElements) {
                     let container = null;
                     try {
-                        container = titleEl.closest(QUESTION_CONTAINER_SELECTORS.join(','));
+                        // 优先用精确选择器定位单题容器，避免匹配到外层列表容器
+                        container = titleEl.closest(QUESTION_CONTAINER_PRECISE.join(','));
                     } catch (e) {
                     }
                     if (!container) {
+                        // 回退：向上找直到容器包含选项或答案区（说明是完整题目）
                         container = titleEl.parentElement;
                         try {
-                            while (container && container.parentElement && container.children.length < 3) {
+                            while (container && container.parentElement) {
+                                if (container.querySelector(OPTIONS_SELECTORS.join(',')) ||
+                                    container.querySelector('.right-key, [class*="right-key"]')) {
+                                    break;
+                                }
                                 container = container.parentElement;
                             }
                         } catch (e) {
@@ -547,15 +622,18 @@ async function collectAllWrongQuestions() {
             console.warn('通过标题元素查找题目容器失败:', e);
         }
 
-        if (questionElements.length <= 1) {
+        // 仅在标题查找完全失败时才回退到宽泛选择器（避免覆盖已找到的正确结果）
+        if (questionElements.length === 0) {
             try {
                 for (const selector of QUESTION_CONTAINER_SELECTORS) {
                     const els = document.querySelectorAll(selector);
-                    if (els.length > 1) {
+                    if (els.length > 0) {
                         questionElements = Array.from(els);
                         break;
                     }
                 }
+                // DOM 包含关系去重：若 A 是 B 的祖先，移除 A（避免父子容器都匹配）
+                questionElements = deduplicateByContainment(questionElements);
             } catch (e) {
                 console.warn('通过容器选择器查找失败:', e);
             }
