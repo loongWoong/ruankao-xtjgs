@@ -50,22 +50,23 @@ function StudyPlan() {
     setError(null);
     try {
       const [planData, todayData, overviewData] = await Promise.all([
-        getStudyPlan(),
-        getTodayTasks(),
+        getStudyPlan().catch(() => ({})),
+        getTodayTasks().catch(() => ({ tasks: [], stats: { total_tasks: 0, completed_tasks: 0 } })),
         getStudyPlanOverview().catch(() => null)
       ]);
 
-      setPlan(planData.plan);
-      setTodayTasks(todayData.tasks || []);
-      setTodayStats(todayData.stats || { total_tasks: 0, completed_tasks: 0 });
-      setWeekOverview(planData.week_overview || []);
+      const plan = planData?.plan || null;
+      setPlan(plan);
+      setTodayTasks(todayData?.tasks || []);
+      setTodayStats(todayData?.stats || { total_tasks: 0, completed_tasks: 0 });
+      setWeekOverview(planData?.week_overview || []);
       setOverview(overviewData);
 
-      if (planData.plan) {
+      if (plan && plan.exam_date) {
         setFormData({
-          exam_date: planData.plan.exam_date,
-          daily_target: planData.plan.daily_target,
-          daily_kp_target: planData.plan.daily_kp_target
+          exam_date: plan.exam_date,
+          daily_target: plan.daily_target || 20,
+          daily_kp_target: plan.daily_kp_target || 3
         });
       }
     } catch (err) {
@@ -119,15 +120,18 @@ function StudyPlan() {
     try {
       const result = await completeTask(taskId);
       if (result.success) {
-        setTodayTasks(prev =>
-          prev.map(t => t.id === taskId ? result.task : t)
-        );
-        const updated = todayTasks.map(t => t.id === taskId ? result.task : t);
-        const completedCount = updated.filter(t => t.status === 'completed').length;
+        // 基于 prev state 计算更新后的列表，避免 stale closure 导致 completed_tasks 计数少 1
+        let updatedList = [];
+        setTodayTasks(prev => {
+          updatedList = prev.map(t => t.id === taskId ? result.task : t);
+          return updatedList;
+        });
+        const completedCount = updatedList.filter(t => t.status === 'completed').length;
         setTodayStats(prev => ({ ...prev, completed_tasks: completedCount }));
       }
     } catch (err) {
       console.error('完成任务失败', err);
+      setError(err.message || '完成任务失败，请重试');
     }
   };
 
@@ -138,7 +142,7 @@ function StudyPlan() {
     return acc;
   }, {});
 
-  const daysUntilExam = overview?.days_until_exam ?? (plan ? Math.ceil((new Date(plan.exam_date) - new Date()) / (1000 * 60 * 60 * 24)) : 0);
+  const daysUntilExam = overview?.days_until_exam ?? (plan && plan.exam_date ? Math.ceil((new Date(plan.exam_date) - new Date()) / (1000 * 60 * 60 * 24)) : 0);
   const totalProgress = overview?.total_progress ?? 0;
 
   const getWeekDays = () => {
