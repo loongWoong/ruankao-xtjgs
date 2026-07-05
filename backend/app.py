@@ -2488,7 +2488,7 @@ def get_stats_daily():
                 'practiced': total,
                 'correct_rate': accuracy
             })
-    return jsonify({'daily': daily_data, 'daily_stats': daily_data})
+    return jsonify({'daily_stats': daily_data})
 
 @app.route('/api/stats/category', methods=['GET'])
 @api_response

@@ -116,10 +116,10 @@ function MockExam() {
       if (detail.exam.status === 'draft') {
         const startData = await startMockExam(examId);
         setExamData(startData.exam);
-        setTimeLeft(detail.exam.duration_minutes * 60);
+        setTimeLeft((detail.exam.duration_minutes || 30) * 60);
       } else if (detail.exam.status === 'in_progress') {
         const startTime = new Date(detail.exam.started_at).getTime();
-        const duration = detail.exam.duration_minutes * 60 * 1000;
+        const duration = (detail.exam.duration_minutes || 30) * 60 * 1000;
         const elapsed = Math.floor((Date.now() - startTime) / 1000);
         const remaining = Math.max(0, Math.floor(duration / 1000) - elapsed);
         setTimeLeft(remaining);

@@ -1,4 +1,5 @@
 import React, { useState, useEffect } from 'react';
+import { fetchAPI } from '../utils/api';
 
 function Statistics() {
   const [categoryStats, setCategoryStats] = useState([]);
@@ -7,30 +8,17 @@ function Statistics() {
   const [dailyStats, setDailyStats] = useState([]);
   const [loading, setLoading] = useState(true);
 
-  const getUserId = () => {
-    const stored = localStorage.getItem('ruankao_user_id');
-    return stored || 'default_user';
-  };
-
   useEffect(() => {
     fetchData();
   }, []);
 
   const fetchData = async () => {
     try {
-      const userId = getUserId();
-      const [categoryRes, chapterRes, weakPointsRes, dailyRes] = await Promise.all([
-        fetch(`http://localhost:5002/api/stats/category?user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/chapter?user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/weak-points?user_id=${encodeURIComponent(userId)}`),
-        fetch(`http://localhost:5002/api/stats/daily?days=30&user_id=${encodeURIComponent(userId)}`)
-      ]);
-
       const [categoryData, chapterData, weakPointsData, dailyData] = await Promise.all([
-        categoryRes.json(),
-        chapterRes.json(),
-        weakPointsRes.json(),
-        dailyRes.json()
+        fetchAPI('/api/stats/category'),
+        fetchAPI('/api/stats/chapter'),
+        fetchAPI('/api/stats/weak-points'),
+        fetchAPI('/api/stats/daily?days=30')
       ]);
 
       setCategoryStats(categoryData.categories || []);
