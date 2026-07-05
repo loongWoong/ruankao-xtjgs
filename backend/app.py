@@ -2759,7 +2759,8 @@ def today_practice():
     limit = request.args.get('limit', 20, type=int)
     user_id = get_user_id()
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
-    today_end = now + ' 23:59:59'
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_end = today_str + ' 23:59:59'
     with get_db_conn() as conn:
         cursor = conn.cursor()
         # 与复习队列一致的优先级：逾期(srs>0且过期) > 今日到期 > 新错题(srs=0)
@@ -2767,8 +2768,8 @@ def today_practice():
             SELECT *,
                    CASE
                        WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1
-                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
                        WHEN srs_stage = 0 OR next_review_time IS NULL THEN 3
+                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
                        ELSE 4
                    END as priority
             FROM wrong_questions
@@ -4644,16 +4645,16 @@ def get_flashcard_stats():
         mastered_count = cursor.fetchone()[0]
 
         cursor.execute('''
-            SELECT COUNT(*) FROM flashcards 
+            SELECT COUNT(*) FROM flashcards
             WHERE (user_id = ? OR user_id = ?)
-            AND next_review_at <= datetime('now')
+            AND next_review_at <= datetime('now', 'localtime')
         ''', (user_id, 'system_default'))
         due_count = cursor.fetchone()[0]
 
         cursor.execute('''
-            SELECT COUNT(*) FROM flashcards 
+            SELECT COUNT(*) FROM flashcards
             WHERE user_id = ?
-            AND DATE(next_review_at) = DATE('now')
+            AND DATE(next_review_at, 'localtime') = DATE('now', 'localtime')
         ''', (user_id,))
         today_review = cursor.fetchone()[0]
 
@@ -5999,19 +6000,20 @@ def get_review_queue():
     limit = safe_int(request.args.get('limit', 20), 20)
     limit = max(1, min(100, limit))
     now = datetime.now().strftime('%Y-%m-%d %H:%M:%S')
+    today_str = datetime.now().strftime('%Y-%m-%d')
+    today_end = today_str + ' 23:59:59'
 
     with get_db_conn() as conn:
         cursor = conn.cursor()
         # 优先级：逾期(srs_stage>0且过期) > 今日到期 > 新错题(srs_stage=0) > 未到期
-        # srs_stage=0 视为"新错题"，即使 next_review_time 过期也不算逾期
-        today_end = now + ' 23:59:59'
+        # srs_stage=0 视为"新错题"，即使 next_review_time 过期也不算逾期/今日到期
         cursor.execute('''
             SELECT id, question, category, chapter, srs_stage, next_review_time,
                    wrong_count, last_review_time,
                    CASE
                        WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1
-                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
                        WHEN srs_stage = 0 OR next_review_time IS NULL THEN 3
+                       WHEN next_review_time IS NOT NULL AND next_review_time <= ? THEN 2
                        ELSE 4
                    END as priority
             FROM wrong_questions
@@ -6022,12 +6024,12 @@ def get_review_queue():
         ''', (now, today_end, user_id, today_end, limit))
         items = [dict(row) for row in cursor.fetchall()]
 
-        # 统计：新错题/逾期/今日到期，区分 srs_stage
+        # 统计：与 priority CASE 完全一致
         cursor.execute('''
             SELECT
-                SUM(CASE WHEN srs_stage = 0 OR next_review_time IS NULL THEN 1 ELSE 0 END) as new_count,
                 SUM(CASE WHEN srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time < ? THEN 1 ELSE 0 END) as overdue_count,
-                SUM(CASE WHEN next_review_time IS NOT NULL AND next_review_time BETWEEN ? AND ? THEN 1 ELSE 0 END) as today_count,
+                SUM(CASE WHEN (srs_stage > 0 AND next_review_time IS NOT NULL AND next_review_time >= ? AND next_review_time <= ?) THEN 1 ELSE 0 END) as today_count,
+                SUM(CASE WHEN srs_stage = 0 OR next_review_time IS NULL THEN 1 ELSE 0 END) as new_count,
                 COUNT(*) as total_pending
             FROM wrong_questions
             WHERE user_id = ? AND is_mastered = 0
@@ -6121,21 +6123,21 @@ def get_today_study_goals():
         # 今日已练习数
         cursor.execute('''
             SELECT COUNT(*) FROM practice_attempts
-            WHERE user_id = ? AND DATE(attempted_at) = DATE('now')
+            WHERE user_id = ? AND DATE(attempted_at, 'localtime') = DATE('now', 'localtime')
         ''', (user_id,))
         practiced_today = cursor.fetchone()[0]
 
         # 今日已复习数（通过 review/submit 或 practice 完成的复习）
         cursor.execute('''
             SELECT COUNT(DISTINCT question_id) FROM practice_attempts
-            WHERE user_id = ? AND DATE(attempted_at) = DATE('now')
+            WHERE user_id = ? AND DATE(attempted_at, 'localtime') = DATE('now', 'localtime')
         ''', (user_id,))
         reviewed_today = cursor.fetchone()[0]
 
         # 今日打卡
         cursor.execute('''
             SELECT COUNT(*) FROM study_checkins
-            WHERE user_id = ? AND checkin_date = DATE('now')
+            WHERE user_id = ? AND checkin_date = DATE('now', 'localtime')
         ''', (user_id,))
         checked_in = cursor.fetchone()[0] > 0
 
@@ -6234,7 +6236,7 @@ def get_study_streak():
         today_date = date_cls.today()
         cursor.execute('''
             SELECT COUNT(*) FROM study_checkins
-            WHERE user_id = ? AND checkin_date = DATE('now')
+            WHERE user_id = ? AND checkin_date = DATE('now', 'localtime')
         ''', (user_id,))
         checked_in_today = cursor.fetchone()[0] > 0
 
@@ -6648,7 +6650,7 @@ def get_learning_report():
         today_checkin = 0
         cursor.execute('''
             SELECT COUNT(*) FROM study_checkins
-            WHERE user_id = ? AND checkin_date = DATE('now')
+            WHERE user_id = ? AND checkin_date = DATE('now', 'localtime')
         ''', (user_id,))
         today_checkin = cursor.fetchone()[0]
 
