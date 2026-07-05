@@ -1844,7 +1844,8 @@ def calculate_daily_tasks(cursor, user_id, plan_id, start_date, kps_to_learn, da
     learned_kps = []  # [{kp_id, learned_day, next_review_day_idx}]
 
     total_days = max(1, (len(kps_to_learn) + daily_kp_target - 1) // daily_kp_target)
-    plan_horizon = min(total_days, 60)
+    # 只生成近 7 天任务，避免一次性预生成 20+ 天任务堆积；后续天数的任务由 regenerate 或每日访问时补充
+    plan_horizon = min(total_days, 7)
 
     for day_idx in range(plan_horizon):
         current_date = start_date + timedelta(days=day_idx)
