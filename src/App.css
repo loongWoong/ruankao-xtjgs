@@ -530,6 +530,9 @@ button:focus-visible,
   cursor: pointer;
   transition: all 0.2s;
   font-size: 0.875rem;
+  /* 默认 fallback（防止白底白字）：未指定变体时使用次要按钮样式 */
+  background: #f0f0f0;
+  color: #333;
 }
 
 .btn-primary {
@@ -549,6 +552,30 @@ button:focus-visible,
 
 .btn-secondary:hover {
   background: #e0e0e0;
+}
+
+/* 返回按钮（之前未定义，导致 5 个按钮无样式）*/
+.btn-back {
+  background: transparent;
+  color: #667eea;
+  border: 1px solid #667eea;
+  padding: 0.5rem 1rem;
+}
+
+.btn-back:hover {
+  background: #f0f4ff;
+}
+
+/* 禁用状态统一样式 */
+.btn:disabled,
+.btn-primary:disabled,
+.btn-secondary:disabled,
+.btn-danger:disabled,
+.btn-back:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none !important;
+  box-shadow: none !important;
 }
 
 .chart-container {
