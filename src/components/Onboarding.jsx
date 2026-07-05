@@ -47,9 +47,11 @@ function Onboarding({ onClose }) {
       localStorage.setItem('ruankao_onboarded_at', new Date().toISOString());
       onClose();
     } catch (e) {
-      // 即使创建计划失败，也标记已完成引导
+      // 创建计划失败时提示用户，但不阻塞引导流程
+      console.error('Onboarding 创建学习计划失败:', e);
+      setError('学习计划创建失败：' + (e.message || '未知错误') + '。可在「学习计划」页稍后重试。');
+      // 仍标记已完成引导，避免反复弹窗
       localStorage.setItem(ONBOARD_KEY, '1');
-      onClose();
     } finally {
       setSubmitting(false);
     }

@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState, useEffect, useRef } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
   fetchAPI,
@@ -24,6 +24,8 @@ function Practice() {
   const [errorPatterns, setErrorPatterns] = useState([]);
   const [selectedPattern, setSelectedPattern] = useState(null);
   const [reflectionGateEnabled, setReflectionGateEnabled] = useState(false);
+  // 记录当前题目开始作答的时间戳，用于提交时计算实际 time_spent（秒）
+  const questionStartedAtRef = useRef(Date.now());
 
   useEffect(() => {
     // 首次访问时主动生成并写入 localStorage，便于 fetchAPI 自动读取
@@ -75,6 +77,8 @@ function Practice() {
       setPracticeResult(null);
       setSelectedPattern(null);
       setStats({ correct: 0, wrong: 0 });
+      // 重置首题开始时间
+      questionStartedAtRef.current = Date.now();
     } catch (error) {
       console.error('加载题目失败:', error);
     } finally {
@@ -94,11 +98,15 @@ function Practice() {
 
     try {
       const isRealExam = mode === 'real-exam' || question.source === 'real_exam';
+      // 计算本题实际作答秒数（从题目展示到提交）
+      const timeSpent = questionStartedAtRef.current > 0
+        ? Math.max(1, Math.round((Date.now() - questionStartedAtRef.current) / 1000))
+        : 0;
       const payload = {
         question_id: question.id,
         answer: selectedAnswer,
         error_pattern_id: selectedPattern,
-        time_spent: 0,
+        time_spent: timeSpent,
         user_id: getUserId()
       };
       const result = isRealExam
@@ -155,6 +163,8 @@ function Practice() {
       setShowResult(false);
       setPracticeResult(null);
       setSelectedPattern(null);
+      // 下一题开始计时
+      questionStartedAtRef.current = Date.now();
     }
   };
 

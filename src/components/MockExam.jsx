@@ -168,6 +168,9 @@ function MockExam() {
   };
 
   const handleRetryExam = async (examId) => {
+    if (!window.confirm('将基于本次考试配置创建一场新的模考，是否继续？')) {
+      return;
+    }
     try {
       const detail = await getMockExam(examId);
       const data = await createMockExam({

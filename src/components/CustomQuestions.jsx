@@ -93,6 +93,18 @@ function CustomQuestions() {
       setError('正确答案不能为空');
       return;
     }
+    // 单选题校验：至少 2 个非空选项，且正确答案必须在选项键中
+    if (formData.question_type === 'single_choice') {
+      const filledKeys = Object.keys(formData.options).filter(k => (formData.options[k] || '').trim());
+      if (filledKeys.length < 2) {
+        setError('单选题至少需要 2 个非空选项');
+        return;
+      }
+      if (!filledKeys.includes(formData.correct_answer.trim())) {
+        setError(`正确答案 "${formData.correct_answer}" 必须对应已填写的选项（${filledKeys.join('/')}）`);
+        return;
+      }
+    }
     setSubmitting(true);
     setError(null);
     try {
