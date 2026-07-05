@@ -38,16 +38,18 @@ function ErrorAnalysis() {
   const fetchData = async () => {
     try {
       setError(null);
+      // 每个接口单独 catch，避免单点失败导致全部数据丢失
       const [overviewData, distData, trendData, recData] = await Promise.all([
-        getStatsOverview(),
-        getErrorDistribution(),
-        getErrorTrend(30),
-        getErrorRecommendations(5)
+        getStatsOverview().catch(() => ({})),
+        getErrorDistribution().catch(() => ({})),
+        getErrorTrend(30).catch(() => ({})),
+        getErrorRecommendations(5).catch(() => ({}))
       ]);
 
       setStats({
         total_wrong_questions: overviewData.total_wrong_questions || 0,
-        total_not_mastered: overviewData.total_not_mastered || 0
+        total_not_mastered: overviewData.total_not_mastered || 0,
+        total_mastered: overviewData.total_mastered || 0
       });
 
       // 后端返回 pie_data（含 category/category_name/count/percentage）+ tag_stats（含 error_count）
@@ -57,9 +59,9 @@ function ErrorAnalysis() {
       // 薄弱知识点来自 tag_stats，按 error_count 降序取前 10
       const tagStats = distData.tag_stats || [];
       const weak = tagStats.map(t => ({
-        name: t.name,
+        name: t.name || '未命名',
         error_count: t.error_count || 0,
-        mastery_rate: 0 // tag_stats 无 mastery_rate，置 0 让进度条显示红色
+        mastery_rate: null // tag_stats 无 mastery_rate，用 null 区分"未知"与"0%"
       })).sort((a, b) => b.error_count - a.error_count).slice(0, 10);
       setWeakPoints(weak);
 
@@ -68,6 +70,7 @@ function ErrorAnalysis() {
       setTrend(trendList);
 
       // 后端返回 questions（含 kp_name/question{suggestions,question_text,question_type}/related_tags/score/suggestions）
+      // 注意: score 是推荐优先级分数(基于KP权重和关键词匹配)，不是错题次数，不能展示为"已错X次"
       const recs = (recData.questions || []).map(q => ({
         type: q.question?.question_type === 'single' ? '单选题'
           : q.question?.question_type === 'multiple' ? '多选题'
@@ -76,7 +79,7 @@ function ErrorAnalysis() {
         knowledge_point: q.kp_name || '未分类',
         content: q.question?.question_text || '',
         reason: (q.suggestions && q.suggestions[0]) || '建议加强该知识点练习',
-        error_count: q.score ? Math.round(q.score) : 0
+        priority_score: q.score || 0  // 推荐优先级分数，非错题次数
       }));
       setRecommendations(recs);
     } catch (err) {
@@ -180,13 +183,13 @@ function ErrorAnalysis() {
         </div>
 
         <div className="stat-card">
-          <div className="stat-card-title">已分析数</div>
+          <div className="stat-card-title">已掌握数</div>
           <div className="stat-card-value" style={{ color: '#667eea' }}>
-            {stats.total_wrong_questions - stats.total_not_mastered}
+            {stats.total_mastered || 0}
           </div>
           <div className="stat-card-sub">
-            {stats.total_wrong_questions > 0 
-              ? `${Math.round(((stats.total_wrong_questions - stats.total_not_mastered) / stats.total_wrong_questions) * 100)}% 已完成`
+            {stats.total_wrong_questions > 0
+              ? `${Math.round(((stats.total_mastered || 0) / stats.total_wrong_questions) * 100)}% 掌握率`
               : '暂无数据'}
           </div>
         </div>
@@ -331,20 +334,22 @@ function ErrorAnalysis() {
                 <div className="ea-weak-info">
                   <div className="ea-weak-name">{wp.name}</div>
                   <div className="ea-weak-bar">
-                    <div 
-                      className="ea-weak-bar-fill" 
-                      style={{ 
-                        width: `${wp.mastery_rate}%`,
-                        background: wp.mastery_rate < 40 ? 'linear-gradient(90deg, #ff6b6b 0%, #ff4757 100%)' : 
-                                   wp.mastery_rate < 60 ? 'linear-gradient(90deg, #ffa502 0%, #ff7f50 100%)' : 
-                                   'linear-gradient(90deg, #6bcb77 0%, #4ade80 100%)'
-                      }} 
+                    <div
+                      className="ea-weak-bar-fill"
+                      style={{
+                        width: wp.mastery_rate == null ? '100%' : `${wp.mastery_rate}%`,
+                        background: wp.mastery_rate == null
+                          ? 'repeating-linear-gradient(45deg, #eee 0, #eee 8px, #ddd 8px, #ddd 16px)'
+                          : wp.mastery_rate < 40 ? 'linear-gradient(90deg, #ff6b6b 0%, #ff4757 100%)' :
+                          wp.mastery_rate < 60 ? 'linear-gradient(90deg, #ffa502 0%, #ff7f50 100%)' :
+                          'linear-gradient(90deg, #6bcb77 0%, #4ade80 100%)'
+                      }}
                     />
                   </div>
                 </div>
                 <div className="ea-weak-stats">
                   <span className="ea-weak-count">错 {wp.error_count}次</span>
-                  <span className="ea-weak-rate">{wp.mastery_rate}%</span>
+                  <span className="ea-weak-rate">{wp.mastery_rate == null ? '未知' : `${wp.mastery_rate}%`}</span>
                 </div>
               </div>
             ))}
@@ -374,7 +379,7 @@ function ErrorAnalysis() {
                 <span>{rec.reason}</span>
               </div>
               <div className="ea-recommend-footer">
-                <span className="ea-error-count">已错 {rec.error_count || 0} 次</span>
+                <span className="ea-error-count">推荐优先级: {Math.round(rec.priority_score || 0)}/5</span>
                 <Link to={`/practice?mode=recommend`} className="btn btn-primary ea-start-btn">
                   开始练习
                 </Link>
