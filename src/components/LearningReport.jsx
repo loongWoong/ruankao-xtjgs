@@ -159,12 +159,12 @@ function LearningReport() {
                   <div key={idx} className="chart-bar-item">
                     <div
                       className="chart-bar"
-                      style={{ height: `${(day.practiced / maxTrendPracticed) * 100}%` }}
+                      style={{ height: `${((day.practiced || 0) / maxTrendPracticed) * 100}%` }}
                     >
-                      <div className="chart-bar-value">{day.practiced}</div>
+                      <div className="chart-bar-value">{day.practiced || 0}</div>
                     </div>
                     <div className="chart-bar-label">{(day.date || '').slice(5)}</div>
-                    <div className="chart-bar-rate">{day.correct_rate}%</div>
+                    <div className="chart-bar-rate">{day.correct_rate || 0}%</div>
                   </div>
                 ))}
               </div>
@@ -183,16 +183,16 @@ function LearningReport() {
           {error_by_category.length > 0 ? (
             <div style={{ marginTop: '1rem' }}>
               {error_by_category.slice(0, 8).map((cat, idx) => {
-                const total = error_by_category.reduce((s, c) => s + c.cnt, 0);
-                const percent = total > 0 ? (cat.cnt / total) * 100 : 0;
+                const total = error_by_category.reduce((s, c) => s + (c.cnt || 0), 0);
+                const percent = total > 0 ? ((cat.cnt || 0) / total) * 100 : 0;
                 const colors = ['#667eea', '#764ba2', '#4caf50', '#ff9800', '#f44336', '#2196f3', '#9c27b0', '#00bcd4'];
                 return (
                   <div key={idx} style={{ marginBottom: '0.75rem' }}>
                     <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '0.875rem', marginBottom: '0.25rem' }}>
                       <span style={{ color: '#555', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap', maxWidth: '70%' }}>
-                        {cat.category}
+                        {cat.category || '未分类'}
                       </span>
-                      <span style={{ fontWeight: 600, color: '#333' }}>{cat.cnt} 题</span>
+                      <span style={{ fontWeight: 600, color: '#333' }}>{cat.cnt || 0} 题</span>
                     </div>
                     <div className="category-bar" style={{ height: '6px', background: '#f0f0f0', borderRadius: '3px' }}>
                       <div
@@ -230,7 +230,7 @@ function LearningReport() {
                   fontWeight: 500
                 }}
               >
-                {tag.tag} · {tag.cnt} 次
+                {tag.tag || '未命名'} · {tag.cnt || 0} 次
               </div>
             ))}
           </div>

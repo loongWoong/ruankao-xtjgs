@@ -144,7 +144,7 @@ function LearningPath() {
             const isExpanded = expanded[idx];
             const masteryColor = getMasteryColor(kp.mastery_score);
             const masteryLabel = getMasteryLabel(kp.mastery_score);
-            const actionStyle = rec.actions[0] ? ACTION_STYLE[rec.actions[0].type] : ACTION_STYLE.learn;
+            const actionStyle = (rec.actions && rec.actions[0] && ACTION_STYLE[rec.actions[0].type]) || ACTION_STYLE.learn;
 
             return (
               <div

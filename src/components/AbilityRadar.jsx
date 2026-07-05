@@ -79,7 +79,8 @@ function AbilityRadar() {
     // 轴标签
     const axisLabels = displayChapters.map((ch, i) => {
       const p = pointFor(i, 1.15);
-      const label = ch.chapter.length > 8 ? ch.chapter.slice(0, 8) + '...' : ch.chapter;
+      const chName = ch.chapter || '未命名';
+      const label = chName.length > 8 ? chName.slice(0, 8) + '...' : chName;
       return (
         <text
           key={i}
@@ -211,27 +212,27 @@ function AbilityRadar() {
                 {chapters.map((ch, idx) => (
                   <tr key={idx} style={{ borderBottom: '1px solid #f0f0f0' }}>
                     <td style={{ padding: '0.6rem' }}>
-                      <div style={{ fontWeight: 600 }}>{ch.chapter}</div>
+                      <div style={{ fontWeight: 600 }}>{ch.chapter || '未命名'}</div>
                       {ch.category && <div style={{ fontSize: '0.8rem', color: '#888' }}>{ch.category}</div>}
                     </td>
-                    <td style={{ padding: '0.6rem', color: '#555' }}>{ch.visited_kps}/{ch.total_kps}</td>
+                    <td style={{ padding: '0.6rem', color: '#555' }}>{ch.visited_kps || 0}/{ch.total_kps || 0}</td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: ch.coverage >= 80 ? '#10b981' : ch.coverage >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
-                        {ch.coverage}%
+                      <span style={{ color: (ch.coverage || 0) >= 80 ? '#10b981' : (ch.coverage || 0) >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
+                        {ch.coverage || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: ch.mastery >= 80 ? '#10b981' : ch.mastery >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
-                        {ch.mastery}%
+                      <span style={{ color: (ch.mastery || 0) >= 80 ? '#10b981' : (ch.mastery || 0) >= 50 ? '#667eea' : '#ef4444', fontWeight: 600 }}>
+                        {ch.mastery || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
-                      <span style={{ color: ch.wrong_mastered_rate >= 80 ? '#10b981' : ch.wrong_mastered_rate >= 50 ? '#f59e0b' : '#ef4444', fontWeight: 600 }}>
-                        {ch.wrong_mastered_rate}%
+                      <span style={{ color: (ch.wrong_mastered_rate || 0) >= 80 ? '#10b981' : (ch.wrong_mastered_rate || 0) >= 50 ? '#f59e0b' : '#ef4444', fontWeight: 600 }}>
+                        {ch.wrong_mastered_rate || 0}%
                       </span>
                     </td>
                     <td style={{ padding: '0.6rem' }}>
-                      {ch.pending_wrong > 0 ? (
+                      {(ch.pending_wrong || 0) > 0 ? (
                         <span style={{ color: '#ef4444', fontWeight: 600 }}>{ch.pending_wrong}</span>
                       ) : (
                         <span style={{ color: '#ccc' }}>0</span>
