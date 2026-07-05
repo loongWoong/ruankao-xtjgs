@@ -94,7 +94,11 @@ function Practice() {
   const handleSubmit = async () => {
     if (!selectedAnswer) return;
     const question = questions[currentIndex];
-    const isCorrect = selectedAnswer === question.correct_answer;
+    // selectedAnswer 是完整选项字符串如 "A.选项内容"，correct_answer 是字母如 "A" 或 "AB"
+    // 提取 selectedAnswer 首字母与 correct_answer 比较，支持多选
+    const selectedLetters = (selectedAnswer.charAt(0) || '').toUpperCase();
+    const correctLetters = (question.correct_answer || '').toUpperCase().split('').sort().join('');
+    const isCorrect = selectedLetters.split('').sort().join('') === correctLetters;
 
     try {
       const isRealExam = mode === 'real-exam' || question.source === 'real_exam';
@@ -115,12 +119,29 @@ function Practice() {
 
       setPracticeResult(result);
       setShowResult(true);
+      // 以后端 result.is_correct 为准（后端已做正确比较），前端 isCorrect 仅作兜底
+      const reallyCorrect = result?.is_correct ?? isCorrect;
       setStats((prev) => ({
-        correct: prev.correct + (isCorrect ? 1 : 0),
-        wrong: prev.wrong + (isCorrect ? 0 : 1)
+        correct: prev.correct + (reallyCorrect ? 1 : 0),
+        wrong: prev.wrong + (reallyCorrect ? 0 : 1)
       }));
     } catch (error) {
       console.error('提交失败:', error);
+      window.alert('提交失败: ' + (error.message || '请重试'));
+    }
+  };
+
+  const handleSkip = async () => {
+    // 跳过当前题目，直接进入下一题
+    if (currentIndex < questions.length - 1) {
+      setCurrentIndex(currentIndex + 1);
+      setSelectedAnswer(null);
+      setShowResult(false);
+      setPracticeResult(null);
+      setSelectedPattern(null);
+      questionStartedAtRef.current = Date.now();
+    } else {
+      handleRestart();
     }
   };
 
@@ -223,11 +244,15 @@ function Practice() {
           {(!currentQuestion.options || currentQuestion.options.length === 0) ? (
             <div className="empty-state" style={{ padding: '1rem', color: '#999' }}>
               此题无选项，请跳过
+              <button className="btn btn-secondary" style={{ marginLeft: '0.75rem', padding: '0.25rem 0.75rem', fontSize: '0.85rem' }} onClick={handleSkip}>跳过此题</button>
             </div>
           ) : currentQuestion.options.map((opt, index) => {
+            // 提取选项前缀字母，支持多选高亮（correct_answer 可能是 "A" 或 "AB"）
+            const optPrefix = (opt.charAt(0) || '').toUpperCase();
+            const correctLetters = (currentQuestion.correct_answer || '').toUpperCase().split('');
             let className = 'practice-option';
             if (showResult) {
-              if (opt.startsWith(currentQuestion.correct_answer)) className += ' correct';
+              if (correctLetters.includes(optPrefix)) className += ' correct';
               else if (opt === selectedAnswer) className += ' wrong';
             } else if (opt === selectedAnswer) className += ' selected';
             return (
@@ -238,6 +263,12 @@ function Practice() {
             );
           })}
         </div>
+
+        {!showResult && currentQuestion.question && currentQuestion.options && currentQuestion.options.length > 0 && (
+          <div className="practice-actions" style={{ marginTop: '0.5rem' }}>
+            <button className="btn btn-secondary" style={{ fontSize: '0.85rem', padding: '0.25rem 0.75rem' }} onClick={handleSkip} disabled={currentIndex >= questions.length - 1 && false}>跳过此题</button>
+          </div>
+        )}
 
         {showResult && reflectionGateEnabled && !practiceResult?.is_correct && (
           <div className="metacognition-section" style={{ marginTop: '1rem', padding: '1rem', background: '#f9f9f9', borderRadius: '8px', border: '1px solid #ddd' }}>
