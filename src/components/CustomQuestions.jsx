@@ -101,9 +101,15 @@ function CustomQuestions() {
         options: formData.question_type === 'single_choice' ? formData.options : null
       };
       if (editingId) {
-        await updateCustomQuestion(editingId, payload);
+        const data = await updateCustomQuestion(editingId, payload);
+        if (data && data.success === false) {
+          throw new Error(data.error || data.message || '更新失败');
+        }
       } else {
-        await createCustomQuestion(payload);
+        const data = await createCustomQuestion(payload);
+        if (data && data.success === false) {
+          throw new Error(data.error || data.message || '创建失败');
+        }
       }
       resetForm();
       setView('list');

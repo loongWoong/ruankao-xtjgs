@@ -2451,7 +2451,7 @@ def get_stats_overview():
         'today_practiced': today_practiced,
         'today_correct_rate': today_correct_rate,
         'knowledge_point_count': kp_count,
-        'avg_mastery_score': avg_mastery
+        'avg_mastery_score': round(avg_mastery * 100, 1) if avg_mastery is not None else 0
     })
 
 @app.route('/api/stats/daily', methods=['GET'])
