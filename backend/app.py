@@ -2139,11 +2139,11 @@ def add_wrong_question():
         q_id = cursor.lastrowid
 
         cursor.execute('''
-            UPDATE wrong_questions 
-            SET next_review_time = CURRENT_TIMESTAMP,
+            UPDATE wrong_questions
+            SET next_review_time = datetime('now', ?),
                 wrong_count = 1
             WHERE id = ?
-        ''', (q_id,))
+        ''', (f'+{SRS_INTERVALS[0]} day', q_id,))
 
         kps = data.get('knowledge_points', [])
         if not kps:
