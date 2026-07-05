@@ -283,15 +283,16 @@ document.getElementById('collectAll').addEventListener('click', function() {
                 if (response) {
                     if (response.success) {
                         const total = response.total || (response.data ? response.data.length : 0);
-                        const successCount = response.successCount || total;
+                        const dedupedCount = response.dedupedCount || 0;
                         const failCount = response.failCount || 0;
                         const inserted = response.inserted || 0;
                         const updated = response.updated || 0;
                         const queued = response.queued || 0;
-                        // 拆分展示：新增/更新/离线队列，比单纯"成功 X 道"更清晰
+                        // 拆分展示：新增/更新/去重/离线队列/失败
                         let msg = `✓ 完成：共 ${total} 道`;
                         if (inserted > 0) msg += `，新增 ${inserted}`;
                         if (updated > 0) msg += `，更新 ${updated}`;
+                        if (dedupedCount > 0) msg += `，去重 ${dedupedCount}`;
                         if (queued > 0) msg += `，离线队列 ${queued}`;
                         if (failCount > 0) msg += `，失败 ${failCount}`;
                         showStatus(msg, failCount > 0 ? 'info' : 'success');

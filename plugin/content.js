@@ -403,6 +403,31 @@ function extractAnswers(questionElement) {
     let correctAnswer = '';
     let userAnswer = '';
 
+    // 规范化答案文本：合并多余空白，去除换行（多选题 "A\nB\nD" → "A B D"）
+    const normalizeAnswer = function(s) {
+        if (!s) return '';
+        return s.replace(/\s+/g, ' ').trim();
+    };
+
+    // 兜底提取：从"正确答案"字样后截取，遇到"你的答案"/"解析"/"正确率"等停止
+    const extractAfterLabel = function(text, label) {
+        const idx = text.indexOf(label);
+        if (idx < 0) return '';
+        let rest = text.substring(idx + label.length);
+        // 去除开头冒号/空白
+        rest = rest.replace(/^[：:\s]+/, '');
+        // 遇到其他标签时截断
+        const stopWords = ['你的答案', '正确答案', '解析', '正确率', '难度', '知识点', '考察', '参考'];
+        let minStop = rest.length;
+        for (const sw of stopWords) {
+            const stopIdx = rest.indexOf(sw);
+            if (stopIdx > 0 && stopIdx < minStop) {
+                minStop = stopIdx;
+            }
+        }
+        return rest.substring(0, minStop).trim();
+    };
+
     try {
         const answerElement = findAnswerElement(questionElement);
         if (answerElement) {
@@ -414,15 +439,15 @@ function extractAnswers(questionElement) {
                     const correctMatch = text.match(/正确答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
                     const userMatch = text.match(/你的答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
                     if (correctMatch) {
-                        correctAnswer = correctMatch[1].trim();
+                        correctAnswer = normalizeAnswer(correctMatch[1]);
                     } else if (text.includes('正确答案')) {
-                        // 兜底：仅有"正确答案"字样但无冒号的情况
-                        correctAnswer = text.replace(/正确答案/, '').replace(/^[：:\s]+/, '').trim();
+                        // 兜底：仅有"正确答案"字样但无冒号，截断后续标签避免解析文字混入
+                        correctAnswer = extractAfterLabel(text, '正确答案');
                     }
                     if (userMatch) {
-                        userAnswer = userMatch[1].trim();
+                        userAnswer = normalizeAnswer(userMatch[1]);
                     } else if (text.includes('你的答案')) {
-                        userAnswer = text.replace(/你的答案/, '').replace(/^[：:\s]+/, '').trim();
+                        userAnswer = extractAfterLabel(text, '你的答案');
                     }
                 } catch (e) {
                 }
@@ -707,8 +732,12 @@ async function collectAllWrongQuestions() {
             }
         }
 
-        const resultMsg = `采集完成：成功 ${successCount} 道，失败 ${failCount} 道` +
-            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued} 道` : '');
+        const dedupedCount = batchResult ? (batchResult.skipped || 0) : 0;
+        const resultMsg = `采集完成：共 ${collectedQuestions.length} 道` +
+            `，成功 ${successCount}` +
+            (dedupedCount > 0 ? `，去重 ${dedupedCount}` : '') +
+            (failCount > 0 ? `，失败 ${failCount}` : '') +
+            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued}` : '');
         console.log(resultMsg);
         try {
             showNotification(resultMsg, successCount > 0 ? 'success' : 'error');
@@ -717,7 +746,9 @@ async function collectAllWrongQuestions() {
 
         return {
             success: successCount > 0,
-            total: questionElements.length,
+            total: collectedQuestions.length,  // 实际采集到的题目数（而非容器数）
+            containerCount: questionElements.length,  // 找到的题目容器数
+            dedupedCount: dedupedCount,  // 去重掉的题目数
             successCount: successCount,
             failCount: failCount,
             inserted: batchResult ? batchResult.inserted : 0,
