@@ -2,10 +2,13 @@ document.addEventListener('DOMContentLoaded', function() {
     loadStats();
     checkBackendStatus();
     loadPendingQueueCount();
+    loadSessionHistory();
 
     document.getElementById('retryQueueBtn').addEventListener('click', function() {
         retryPendingQueue();
     });
+
+    document.getElementById('collectSession').addEventListener('click', collectPracticeSession);
 });
 
 function loadStats() {
@@ -256,4 +259,109 @@ function showStatus(message, type) {
             statusDiv.className = '';
         }, 4000);
     }
+}
+
+function collectPracticeSession() {
+    showStatus('正在采集练习结果...', 'info');
+
+    chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
+        if (!tabs || tabs.length === 0) {
+            showStatus('无法获取当前标签页', 'error');
+            return;
+        }
+
+        try {
+            chrome.tabs.sendMessage(tabs[0].id, {action: 'collectPracticeSession'}, function(response) {
+                if (chrome.runtime.lastError) {
+                    console.error('Chrome runtime error:', chrome.runtime.lastError);
+                    showStatus('采集失败：内容脚本未加载，请刷新页面后重试', 'error');
+                    return;
+                }
+
+                if (response) {
+                    if (response.success && response.data) {
+                        showStatus('采集成功，正在发送到服务器...', 'info');
+                        chrome.runtime.sendMessage({
+                            action: 'sendSession',
+                            data: response.data
+                        }, function(backendResponse) {
+                            if (chrome.runtime.lastError) {
+                                showStatus('发送失败：' + chrome.runtime.lastError.message, 'error');
+                                return;
+                            }
+                            if (backendResponse && backendResponse.success) {
+                                const d = response.data;
+                                const scoreText = d.score > 0 ? `${d.score}分` : `${Math.round((d.accuracy || 0) * 100)}%`;
+                                showStatus(`✓ 练习结果已保存：${d.paper_name || '未命名'} ${d.correct_count}/${d.total_questions} (${scoreText})`, 'success');
+                                loadSessionHistory();
+                            } else if (backendResponse && backendResponse.queued) {
+                                showStatus('网络异常，已加入待发送队列', 'info');
+                                loadPendingQueueCount();
+                                loadSessionHistory();
+                            } else {
+                                showStatus('发送失败：' + (backendResponse ? backendResponse.error : '未知错误'), 'error');
+                            }
+                        });
+                    } else {
+                        showStatus('采集失败：' + (response.error || '未识别到结果页，请在交卷结果页使用'), 'error');
+                    }
+                } else {
+                    showStatus('采集失败：无法与页面通信', 'error');
+                }
+            });
+        } catch (e) {
+            console.error('发送消息异常:', e);
+            showStatus('采集失败：' + e.message, 'error');
+        }
+    });
+}
+
+function loadSessionHistory() {
+    try {
+        chrome.runtime.sendMessage({ action: 'getSessionHistory' }, function(response) {
+            if (chrome.runtime.lastError) {
+                console.log('加载采集历史失败:', chrome.runtime.lastError);
+                renderSessionHistory([]);
+                return;
+            }
+            if (response && response.success) {
+                renderSessionHistory(response.items || []);
+            } else {
+                renderSessionHistory([]);
+            }
+        });
+    } catch (e) {
+        console.error('加载采集历史异常:', e);
+        renderSessionHistory([]);
+    }
+}
+
+function renderSessionHistory(items) {
+    const container = document.getElementById('sessionHistory');
+    if (!container) return;
+
+    if (!items || items.length === 0) {
+        container.innerHTML = '<div class="history-empty">暂无采集记录</div>';
+        return;
+    }
+
+    const html = items.slice(0, 10).map(function(item) {
+        const name = (item.paper_name || '未命名练习').substring(0, 20);
+        const scoreText = item.score > 0 ? item.score + '分' : Math.round((item.accuracy || 0) * 100) + '%';
+        const correctText = item.total_questions > 0 ? (item.correct_count + '/' + item.total_questions) : '';
+        const syncIcon = item.synced ? '<span class="history-item-synced">✓</span>' : '<span class="history-item-unsynced">待同步</span>';
+        return '<div class="history-item">' +
+            '<div class="history-item-name">' + escapeHtml(name) + '</div>' +
+            '<div class="history-item-score">' + correctText + ' ' + scoreText + '</div>' +
+            syncIcon +
+            '</div>';
+    }).join('');
+    container.innerHTML = html;
+}
+
+function escapeHtml(text) {
+    if (!text) return '';
+    const div = document.createElement('div');
+    div.textContent = text;
+    return div.innerHTML;
 }

@@ -756,6 +756,161 @@ function showNotification(message, type) {
     }
 }
 
+// 练习会话结果汇总选择器（覆盖软考达人常见结果页 DOM 结构）
+const SESSION_PAPER_NAME_SELECTORS = [
+    '.paper-title', '.exam-title', '.paper-name', '.exam-name',
+    '[class*="paper-title"]', '[class*="exam-title"]', '[class*="paperName"]',
+    'h1', 'h2', '.title'
+];
+const SESSION_SCORE_SELECTORS = [
+    '.total-score', '.exam-score', '.score-value', '.final-score',
+    '[class*="total-score"]', '[class*="exam-score"]', '[class*="scoreValue"]',
+    '[class*="finalScore"]'
+];
+const SESSION_SUMMARY_SELECTORS = [
+    '.result-summary', '.score-summary', '.exam-result', '.result-info',
+    '.practice-summary', '[class*="result-summary"]', '[class*="scoreSummary"]',
+    '[class*="examResult"]', '[class*="practiceSummary"]'
+];
+
+function collectPracticeSession() {
+    try {
+        console.log('开始采集练习会话结果');
+
+        // 1. 试卷名称
+        let paperName = '';
+        for (const selector of SESSION_PAPER_NAME_SELECTORS) {
+            try {
+                const el = document.querySelector(selector);
+                if (el && el.textContent && el.textContent.trim().length > 0 && el.textContent.trim().length < 200) {
+                    paperName = el.textContent.trim();
+                    break;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        // 兜底：用 document.title
+        if (!paperName) {
+            paperName = document.title || '';
+        }
+
+        // 2. 从汇总区提取得分/正确数/错误数/总数/用时
+        let summaryText = '';
+        let summaryEl = null;
+        for (const selector of SESSION_SUMMARY_SELECTORS) {
+            try {
+                const el = document.querySelector(selector);
+                if (el && el.textContent && el.textContent.trim().length > 5) {
+                    summaryEl = el;
+                    summaryText = el.textContent.trim();
+                    break;
+                }
+            } catch (e) {
+                continue;
+            }
+        }
+        // 兜底：整页 body 文本用于正则提取
+        if (!summaryText) {
+            summaryText = document.body ? document.body.innerText.substring(0, 5000) : '';
+        }
+
+        // 3. 正则提取各数值字段（兼容多种表述）
+        // 得分：支持 "得分: 85" / "总分: 100" / "成绩: 85分"
+        let score = 0;
+        const scoreMatch = summaryText.match(/(?:得分|成绩|分数)\s*[：:]\s*(\d+(?:\.\d+)?)\s*分?/) ||
+                          summaryText.match(/(?:score)\s*[：:]\s*(\d+(?:\.\d+)?)/i);
+        if (scoreMatch) {
+            score = parseFloat(scoreMatch[1]) || 0;
+        }
+
+        // 总题数：支持 "总题数: 75" / "共 75 题" / "题目总数: 75"
+        let totalQuestions = 0;
+        const totalMatch = summaryText.match(/(?:总题数|题目总数|共)\s*[：:]?\s*(\d+)\s*题?/) ||
+                           summaryText.match(/(?:total)\s*[：:]\s*(\d+)/i);
+        if (totalMatch) {
+            totalQuestions = parseInt(totalMatch[1], 10) || 0;
+        }
+
+        // 正确数
+        let correctCount = 0;
+        const correctMatch = summaryText.match(/(?:正确数|答对|正确)\s*[：:]\s*(\d+)\s*题?/) ||
+                             summaryText.match(/(?:correct)\s*[：:]\s*(\d+)/i);
+        if (correctMatch) {
+            correctCount = parseInt(correctMatch[1], 10) || 0;
+        }
+
+        // 错误数
+        let wrongCount = 0;
+        const wrongMatch = summaryText.match(/(?:错误数|答错|错误|错题)\s*[：:]\s*(\d+)\s*题?/) ||
+                           summaryText.match(/(?:wrong|incorrect)\s*[：:]\s*(\d+)/i);
+        if (wrongMatch) {
+            wrongCount = parseInt(wrongMatch[1], 10) || 0;
+        }
+
+        // 用时：支持 "用时: 90分钟" / "耗时: 1小时30分" / "时间: 5400秒"
+        let timeSpent = 0;
+        const timeMatch1 = summaryText.match(/(?:用时|耗时|时间)\s*[：:]\s*(\d+)\s*分钟?/);
+        const timeMatch2 = summaryText.match(/(?:用时|耗时|时间)\s*[：:]\s*(\d+)\s*小时\s*(\d+)?\s*分钟?/);
+        const timeMatch3 = summaryText.match(/(?:用时|耗时|时间)\s*[：:]\s*(\d+)\s*秒/);
+        if (timeMatch2) {
+            timeSpent = (parseInt(timeMatch2[1], 10) || 0) * 60 + (parseInt(timeMatch2[2] || '0', 10) || 0);
+        } else if (timeMatch1) {
+            timeSpent = parseInt(timeMatch1[1], 10) || 0;
+        } else if (timeMatch3) {
+            timeSpent = Math.round((parseInt(timeMatch3[1], 10) || 0) / 60);
+        }
+
+        // 正确率：若未直接采集到，且 total>0，则用 correct/total 推算
+        let accuracy = 0;
+        const accuracyMatch = summaryText.match(/(?:正确率|准确率|通过率)\s*[：:]\s*(\d+(?:\.\d+)?)\s*%?/);
+        if (accuracyMatch) {
+            accuracy = parseFloat(accuracyMatch[1]) || 0;
+            // 若 > 1，视为百分制，归一化到 0-1
+            if (accuracy > 1) {
+                accuracy = accuracy / 100;
+            }
+        } else if (totalQuestions > 0 && correctCount > 0) {
+            accuracy = correctCount / totalQuestions;
+        }
+
+        // 总题数兜底：若未匹配到，但 correct+wrong>0，则用其和
+        if (totalQuestions <= 0 && (correctCount + wrongCount) > 0) {
+            totalQuestions = correctCount + wrongCount;
+        }
+
+        // 4. 校验：至少要有总题数或得分之一
+        if (totalQuestions <= 0 && score <= 0) {
+            return {
+                success: false,
+                error: '未识别到练习结果汇总信息（需在交卷结果页使用）'
+            };
+        }
+
+        const sessionData = {
+            paper_name: paperName,
+            total_questions: totalQuestions,
+            correct_count: correctCount,
+            wrong_count: wrongCount,
+            score: score,
+            accuracy: accuracy,
+            time_spent: timeSpent,
+            source_url: window.location.href,
+            submitted_at: new Date().toISOString(),
+            raw_data: {
+                title: document.title,
+                summary_text: summaryText.substring(0, 1000)
+            }
+        };
+
+        console.log('采集的练习会话:', JSON.stringify(sessionData, null, 2));
+        return { success: true, data: sessionData };
+    } catch (error) {
+        console.error('采集练习会话失败:', error);
+        return { success: false, error: error.message };
+    }
+}
+
 chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     console.log('content.js收到消息:', request);
 
@@ -769,6 +924,9 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             sendResponse({ success: false, error: error.message });
         });
         return true;
+    } else if (request.action === 'collectPracticeSession') {
+        const result = collectPracticeSession();
+        sendResponse(result);
     }
 
     return true;

@@ -607,6 +607,28 @@ def ensure_schema():
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_custom_q_user ON custom_questions(user_id)')
         cursor.execute('CREATE INDEX IF NOT EXISTS idx_custom_q_category ON custom_questions(category)')
 
+        # 练习会话结果（从软考达人网站采集的整套练习/试卷结果汇总）
+        cursor.execute('''
+            CREATE TABLE IF NOT EXISTS practice_sessions (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                user_id TEXT NOT NULL,
+                source_url TEXT,
+                paper_name TEXT,
+                total_questions INTEGER DEFAULT 0,
+                correct_count INTEGER DEFAULT 0,
+                wrong_count INTEGER DEFAULT 0,
+                score REAL,
+                accuracy REAL,
+                time_spent INTEGER DEFAULT 0,
+                started_at DATETIME,
+                submitted_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                raw_data TEXT,
+                created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            )
+        ''')
+        cursor.execute('CREATE INDEX IF NOT EXISTS idx_practice_sessions_user ON practice_sessions(user_id, created_at)')
+        cursor.execute('CREATE UNIQUE INDEX IF NOT EXISTS idx_practice_sessions_dedup ON practice_sessions(user_id, source_url, submitted_at)')
+
         conn.commit()
 
 def _init_error_tags(cursor):
@@ -2250,6 +2272,114 @@ def batch_add_wrong_questions():
         'failed': failed,
         'errors': errors
     })
+
+@app.route('/api/practice-sessions', methods=['POST'])
+@api_response
+def add_practice_session():
+    """提交一次练习会话结果（从软考达人网站采集的整套练习/试卷汇总）。
+    请求体字段: paper_name, total_questions, correct_count, wrong_count, score,
+    accuracy, time_spent, source_url, started_at, submitted_at, user_id, raw_data
+    """
+    data = request.get_json() or {}
+
+    clean_user_id = sanitize_string(data.get('user_id', 'default_user'), 100) or 'default_user'
+    clean_source_url = sanitize_string(data.get('source_url', ''), 1000)
+    clean_paper_name = sanitize_string(data.get('paper_name', ''), 300)
+
+    total_questions = safe_int(data.get('total_questions', 0), 0)
+    correct_count = safe_int(data.get('correct_count', 0), 0)
+    wrong_count = safe_int(data.get('wrong_count', 0), 0)
+    time_spent = safe_int(data.get('time_spent', 0), 0)
+
+    # score/accuracy 允许浮点，做范围约束
+    try:
+        score = float(data.get('score', 0) or 0)
+    except (TypeError, ValueError):
+        score = 0.0
+    try:
+        accuracy = float(data.get('accuracy', 0) or 0)
+    except (TypeError, ValueError):
+        accuracy = 0.0
+    score = max(0.0, min(score, 1000.0))
+    accuracy = max(0.0, min(accuracy, 1.0))
+
+    # 时间字段兜底
+    started_at = data.get('started_at')
+    submitted_at = data.get('submitted_at')
+
+    # raw_data 保存原始 JSON（便于后续追溯），限长
+    raw_data_str = None
+    raw_data = data.get('raw_data')
+    if raw_data is not None:
+        try:
+            raw_data_str = json.dumps(raw_data, ensure_ascii=False)[:5000]
+        except (TypeError, ValueError):
+            raw_data_str = None
+
+    # 校验：至少要有试卷名或来源 URL，且题目总数 > 0
+    if not clean_paper_name and not clean_source_url:
+        return jsonify({'error': 'paper_name or source_url is required'}), 400
+    if total_questions <= 0:
+        return jsonify({'error': 'total_questions must be > 0'}), 400
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('''
+            INSERT INTO practice_sessions (
+                user_id, source_url, paper_name, total_questions,
+                correct_count, wrong_count, score, accuracy, time_spent,
+                started_at, submitted_at, raw_data
+            ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ''', (
+            clean_user_id, clean_source_url, clean_paper_name, total_questions,
+            correct_count, wrong_count, score, accuracy, time_spent,
+            started_at, submitted_at, raw_data_str
+        ))
+        session_id = cursor.lastrowid
+        conn.commit()
+
+    return jsonify({'success': True, 'id': session_id})
+
+@app.route('/api/practice-sessions', methods=['GET'])
+@api_response
+def get_practice_sessions():
+    """查询练习会话历史。支持分页，按 created_at 倒序。"""
+    page, limit = get_pagination_params()
+    user_id = get_user_id()
+
+    with get_db_conn() as conn:
+        cursor = conn.cursor()
+        cursor.execute('SELECT COUNT(*) FROM practice_sessions WHERE user_id = ?', (user_id,))
+        total = cursor.fetchone()[0]
+
+        offset = (page - 1) * limit
+        cursor.execute('''
+            SELECT id, user_id, source_url, paper_name, total_questions,
+                   correct_count, wrong_count, score, accuracy, time_spent,
+                   started_at, submitted_at, created_at
+            FROM practice_sessions
+            WHERE user_id = ?
+            ORDER BY created_at DESC
+            LIMIT ? OFFSET ?
+        ''', (user_id, limit, offset))
+        items = []
+        for row in cursor.fetchall():
+            items.append({
+                'id': row['id'],
+                'source_url': row['source_url'],
+                'paper_name': row['paper_name'],
+                'total_questions': row['total_questions'],
+                'correct_count': row['correct_count'],
+                'wrong_count': row['wrong_count'],
+                'score': row['score'],
+                'accuracy': row['accuracy'],
+                'time_spent': row['time_spent'],
+                'started_at': row['started_at'],
+                'submitted_at': row['submitted_at'],
+                'created_at': row['created_at']
+            })
+
+    return jsonify({'items': items, 'total': total, 'page': page, 'limit': limit})
 
 @app.route('/api/wrong-questions', methods=['GET'])
 @api_response

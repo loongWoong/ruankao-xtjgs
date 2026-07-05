@@ -1,12 +1,15 @@
 const API_URL = 'http://localhost:5002/api/wrong-questions';
 const BATCH_API_URL = 'http://localhost:5002/api/wrong-questions/batch';
+const SESSION_API_URL = 'http://localhost:5002/api/practice-sessions';
 const PENDING_QUEUE_KEY = 'pending_queue';
 const DEDUP_KEY = 'dedup_map';
+const SESSION_HISTORY_KEY = 'session_history';
 const DEDUP_TTL = 5 * 60 * 1000;
 const MAX_RETRIES = 3;
 const ALARM_NAME = 'retry_pending_queue';
 const ALARM_INTERVAL = 0.5;
 const BATCH_CHUNK_SIZE = 200;
+const SESSION_HISTORY_LIMIT = 20;
 
 let dedupMap = {};
 
@@ -232,6 +235,79 @@ async function sendBatchToBackend(items) {
     };
 }
 
+async function sendSessionToBackend(sessionData) {
+    // 发送练习会话结果到后端。带 3 次重试，失败入离线队列（复用 pending_queue）。
+    // 成功后写入本地 session_history 供 popup 展示最近采集。
+    let lastError = null;
+
+    for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
+        try {
+            const response = await fetch(SESSION_API_URL, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(sessionData)
+            });
+
+            if (response.ok) {
+                const result = await response.json();
+                console.log('练习会话发送成功:', result);
+                // 记录到本地历史
+                await appendSessionHistory({
+                    ...sessionData,
+                    backend_id: result.id,
+                    synced: true,
+                    synced_at: Date.now()
+                });
+                return { success: true, id: result.id };
+            }
+
+            lastError = new Error('HTTP ' + response.status);
+            console.warn(`练习会话发送失败，第 ${attempt + 1} 次尝试:`, lastError.message);
+        } catch (e) {
+            lastError = e;
+            console.warn(`练习会话发送失败，第 ${attempt + 1} 次尝试:`, e.message);
+        }
+
+        if (attempt < MAX_RETRIES) {
+            const delay = Math.pow(2, attempt) * 1000;
+            await new Promise(resolve => setTimeout(resolve, delay));
+        }
+    }
+
+    // 失败：入离线队列 + 本地历史标记未同步
+    await addToPendingQueue({ type: 'session', data: sessionData });
+    await appendSessionHistory({
+        ...sessionData,
+        synced: false,
+        synced_at: Date.now()
+    });
+    return { success: false, error: lastError ? lastError.message : '未知错误', queued: true };
+}
+
+async function appendSessionHistory(entry) {
+    try {
+        const result = await chrome.storage.local.get(SESSION_HISTORY_KEY);
+        const history = result[SESSION_HISTORY_KEY] || [];
+        history.unshift(entry);
+        if (history.length > SESSION_HISTORY_LIMIT) {
+            history.length = SESSION_HISTORY_LIMIT;
+        }
+        await chrome.storage.local.set({ [SESSION_HISTORY_KEY]: history });
+    } catch (e) {
+        console.error('写入会话历史失败:', e);
+    }
+}
+
+async function getSessionHistory() {
+    try {
+        const result = await chrome.storage.local.get(SESSION_HISTORY_KEY);
+        return result[SESSION_HISTORY_KEY] || [];
+    } catch (e) {
+        console.error('读取会话历史失败:', e);
+        return [];
+    }
+}
+
 async function processPendingQueue() {
     const queue = await getPendingQueue();
     if (queue.length === 0) return;
@@ -243,11 +319,23 @@ async function processPendingQueue() {
 
     for (const item of queue) {
         try {
-            const result = await sendToBackend(item.data, true);
-            if (result.success) {
-                successCount++;
+            let result;
+            // 支持两种队列项：单题（默认）和练习会话（type: 'session'）
+            if (item.type === 'session') {
+                result = await sendSessionToBackend(item.data);
+                // 会话发送成功后从队列移除；失败则保留
+                if (result.success) {
+                    successCount++;
+                } else {
+                    remaining.push(item);
+                }
             } else {
-                remaining.push(item);
+                result = await sendToBackend(item.data, true);
+                if (result.success) {
+                    successCount++;
+                } else {
+                    remaining.push(item);
+                }
             }
         } catch (e) {
             console.error('处理队列项失败:', e);
@@ -393,6 +481,24 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         })
         .catch(error => {
             sendResponse({ success: false, error: error.message });
+        });
+        return true;
+    } else if (request.action === 'sendSession') {
+        console.log('收到练习会话发送请求:', request.data && request.data.paper_name);
+        sendSessionToBackend(request.data)
+            .then(result => {
+                sendResponse(result);
+            })
+            .catch(error => {
+                console.error('练习会话发送异常:', error);
+                sendResponse({ success: false, error: error.message });
+            });
+        return true;
+    } else if (request.action === 'getSessionHistory') {
+        getSessionHistory().then(history => {
+            sendResponse({ success: true, items: history });
+        }).catch(error => {
+            sendResponse({ success: false, error: error.message, items: [] });
         });
         return true;
     }
