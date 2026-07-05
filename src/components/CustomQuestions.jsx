@@ -137,7 +137,11 @@ function CustomQuestions() {
     if (!confirm('确认删除这道题？')) return;
     try {
       await deleteCustomQuestion(id);
-      loadQuestions(page);
+      // 删除后判断当前页是否还有数据，若为空则回退上一页（避免停留在空列表页）
+      const remaining = total - 1;
+      const maxPage = Math.max(1, Math.ceil(remaining / PAGE_SIZE));
+      const targetPage = page > maxPage ? maxPage : page;
+      loadQuestions(targetPage);
     } catch (e) {
       setError(e.message || '删除失败');
     }
@@ -226,13 +230,13 @@ function CustomQuestions() {
                     <span style={{ color: '#667eea', fontWeight: 600 }}>第 {(page - 1) * PAGE_SIZE + idx + 1} 题</span>
                     <div style={{ display: 'flex', gap: '0.5rem' }}>
                       {q.category && <span style={{ background: '#f0f0f0', color: '#666', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{q.category}</span>}
-                      <span style={{ background: '#eef1ff', color: '#667eea', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{q.source}</span>
+                      <span style={{ background: '#eef1ff', color: '#667eea', padding: '2px 8px', borderRadius: '4px', fontSize: '0.8rem' }}>{q.source || '手动'}</span>
                     </div>
                   </div>
-                  <div style={{ marginBottom: '0.5rem', lineHeight: 1.6 }}>{q.question_text}</div>
+                  <div style={{ marginBottom: '0.5rem', lineHeight: 1.6 }}>{q.question_text || '（无题干）'}</div>
                   {opts && (
                     <div style={{ fontSize: '0.9rem', color: '#555', marginBottom: '0.5rem' }}>
-                      {Object.entries(opts).map(([k, v]) => (
+                      {Object.entries(opts).filter(([k, v]) => v && v.trim()).map(([k, v]) => (
                         <div key={k} style={{ padding: '0.15rem 0' }}>
                           <strong style={{ color: q.correct_answer === k ? '#10b981' : '#888' }}>{k}.</strong> {v}
                           {q.correct_answer === k && <span style={{ color: '#10b981', marginLeft: '0.5rem' }}>✓ 正确答案</span>}
@@ -291,7 +295,16 @@ function CustomQuestions() {
               <select
                 className="sp-form-input"
                 value={formData.question_type}
-                onChange={e => setFormData(prev => ({ ...prev, question_type: e.target.value }))}
+                onChange={e => {
+                  const newType = e.target.value;
+                  setFormData(prev => {
+                    // 切换题型时重置 correct_answer，避免单选 'A' 带入判断题导致非法数据
+                    if (newType === 'true_false') {
+                      return { ...prev, question_type: newType, correct_answer: '正确' };
+                    }
+                    return { ...prev, question_type: newType, correct_answer: '' };
+                  });
+                }}
               >
                 <option value="single_choice">单选题</option>
                 <option value="true_false">判断题</option>
