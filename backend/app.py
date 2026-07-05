@@ -2156,16 +2156,36 @@ def _upsert_wrong_question_record(cursor, data, user_id=None):
             existing_id = row[0]
 
     if existing_id:
-        # 已存在：更新作答记录和错误次数，不覆盖 correct_answer/options
+        # 已存在：更新作答记录和错误次数
+        # correct_answer/options/analysis/category/chapter 仅在原值为空时补充
+        # （首次采集可能无答案，交卷后再次采集时补全）
+        clean_options_json = json.dumps(clean_options)
         cursor.execute('''
             UPDATE wrong_questions
             SET user_answer = ?,
+                correct_answer = COALESCE(NULLIF(?, ''), correct_answer),
+                options = CASE
+                    WHEN ? IS NOT NULL AND ? NOT IN ('', '[]')
+                         AND (options IS NULL OR options = '' OR options = '[]')
+                    THEN ? ELSE options END,
+                analysis = COALESCE(NULLIF(?, ''), analysis),
+                category = COALESCE(NULLIF(?, ''), category),
+                chapter = COALESCE(NULLIF(?, ''), chapter),
                 wrong_count = wrong_count + 1,
                 error_count = error_count + 1,
                 last_error_at = CURRENT_TIMESTAMP,
                 source_url = COALESCE(NULLIF(?, ''), source_url)
             WHERE id = ?
-        ''', (clean_user_answer, clean_source_url, existing_id))
+        ''', (
+            clean_user_answer,
+            clean_correct_answer,
+            clean_options_json, clean_options_json, clean_options_json,
+            clean_analysis,
+            clean_category,
+            clean_chapter,
+            clean_source_url,
+            existing_id
+        ))
         q_id = existing_id
         is_new = False
     else:
