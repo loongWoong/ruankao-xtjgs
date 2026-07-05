@@ -53,11 +53,11 @@ function Dashboard() {
     try {
       setError(null);
       const [statsData, cognitionData, dailyData, categoryData, conversionData, reviewData, goalsData, textbookData, flashcardData, essayData, caseData, mockData] = await Promise.all([
-        getStatsOverview(),
-        getStatsCognition(),
-        getStatsDaily(7),
-        getStatsCategory(),
-        getRepracticeConversion(7, 72),
+        getStatsOverview().catch(() => ({})),
+        getStatsCognition().catch(() => ({ cognition_map: [] })),
+        getStatsDaily(7).catch(() => ({ daily_stats: [] })),
+        getStatsCategory().catch(() => ({ categories: [] })),
+        getRepracticeConversion(7, 72).catch(() => ({ conversion_rate: 0, denominator_users: 0, numerator_users: 0 })),
         getReviewQueue(1).catch(() => ({ stats: {} })),
         getTodayStudyGoals().catch(() => ({ goals: [], overall_rate: 0, streak_days: 0, checked_in_today: false })),
         getTextbookProgress().catch(() => ({ total_chapters: 0, completed_count: 0, completion_rate: 0 })),
@@ -67,10 +67,10 @@ function Dashboard() {
         getMockExamStats().catch(() => ({ total_exams: 0, avg_score: 0 }))
       ]);
 
-      setStats(statsData);
-      setCognitionMap(cognitionData.cognition_map || []);
-      setDailyStats(dailyData.daily_stats || []);
-      setCategoryStats(categoryData.categories || []);
+      setStats(prev => ({ ...prev, ...(statsData || {}) }));
+      setCognitionMap(cognitionData?.cognition_map || []);
+      setDailyStats(dailyData?.daily_stats || []);
+      setCategoryStats(categoryData?.categories || []);
       setConversion(conversionData || { conversion_rate: 0, denominator_users: 0, numerator_users: 0 });
       setReviewSummary(reviewData.stats || { today_count: 0, overdue_count: 0, total_pending: 0 });
       setGoals(goalsData);
@@ -279,7 +279,7 @@ function Dashboard() {
               { key: 'textbook', icon: '📖', label: '教材学习', to: '/textbook',
                 main: `${lc.textbook.completed}/${lc.textbook.total}`,
                 sub: `章节 · ${lc.textbook.rate}%`, progress: lc.textbook.rate },
-              { key: 'flashcard', icon: '🎴', label: '闪卡复习', to: '/knowledge',
+              { key: 'flashcard', icon: '🎴', label: '闪卡复习', to: '/notebook',
                 main: `${lc.flashcard.due}`,
                 sub: `待复习 · 掌握 ${lc.flashcard.mastered}/${lc.flashcard.total}`,
                 progress: lc.flashcard.total > 0 ? (lc.flashcard.mastered / lc.flashcard.total) * 100 : 0 },
