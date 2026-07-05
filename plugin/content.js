@@ -14,9 +14,19 @@ const OPTIONS_SELECTORS = [
     '.question-options',
     '.options-container',
     '.exam-options',
+    '.answer-options',
     '[class*="question-options"]',
-    '[class*="QuestionOptions"]'
+    '[class*="QuestionOptions"]',
+    '[class*="option-list"]',
+    '[class*="OptionList"]'
 ];
+
+// 选项内部条目选择器（用于遍历每个选项节点）
+const OPTION_ITEM_SELECTORS = '.options, .aWFalse, .aWtrue, .option-item, [class*="option-item"], .exam-option, [class*="exam-option"], .answer-option, [class*="answer-option"]';
+// 选项标签（A/B/C/D）选择器
+const OPTION_LABEL_SELECTORS = '.awoption, .option-label, [class*="option-label"], [class*="OptionLabel"]';
+// 选项内容选择器
+const OPTION_CONTENT_SELECTORS = '.content .ql-editor, .option-content, [class*="option-content"], [class*="OptionContent"]';
 
 const ANSWER_SELECTORS = [
     '.answer-to-the-question',
@@ -120,7 +130,8 @@ function collectCurrentQuestion() {
             correct_answer: correctAnswer,
             user_answer: userAnswer,
             category: category,
-            analysis: analysis
+            analysis: analysis,
+            source_url: window.location.href  // 记录题目来源页，便于追溯
         };
 
         console.log('采集的数据:', JSON.stringify(questionData, null, 2));
@@ -227,15 +238,21 @@ function extractOptions(questionElement) {
     }
 
     try {
-        const optionElements = container.querySelectorAll('.options, .aWFalse, .aWtrue, .option-item, [class*="option-item"]');
+        const optionElements = container.querySelectorAll(OPTION_ITEM_SELECTORS);
         optionElements.forEach((optionElement) => {
             try {
-                const optionLabelElement = optionElement.querySelector('.awoption, .option-label, [class*="option-label"]');
-                const contentElement = optionElement.querySelector('.content .ql-editor, .option-content, [class*="option-content"]');
+                const optionLabelElement = optionElement.querySelector(OPTION_LABEL_SELECTORS);
+                const contentElement = optionElement.querySelector(OPTION_CONTENT_SELECTORS);
                 if (optionLabelElement && contentElement) {
                     const optionLabel = optionLabelElement.textContent.trim();
                     const optionContent = contentElement.textContent.trim();
                     options.push(`${optionLabel} ${optionContent}`);
+                } else {
+                    // 降级：直接取整段文本作为选项（标签与内容未分离时）
+                    const fullText = optionElement.textContent.trim();
+                    if (fullText && fullText.length > 0 && fullText.length < 200) {
+                        options.push(fullText);
+                    }
                 }
             } catch (e) {
                 console.warn('提取单个选项失败:', e);
@@ -308,10 +325,19 @@ function extractAnswers(questionElement) {
             rightKeyElements.forEach(el => {
                 try {
                     const text = el.textContent.trim();
-                    if (text.startsWith('正确答案：') || text.includes('正确答案')) {
-                        correctAnswer = text.replace(/正确答案[：:]/, '').trim();
-                    } else if (text.startsWith('你的答案：') || text.includes('你的答案')) {
-                        userAnswer = text.replace(/你的答案[：:]/, '').trim();
+                    // 同时兼容全角"："与半角":"，并兼容"正确答案"/"你的答案"前后可能出现的空白
+                    const correctMatch = text.match(/正确答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
+                    const userMatch = text.match(/你的答案\s*[：:]\s*([A-Za-z0-9,，、\s]+)/);
+                    if (correctMatch) {
+                        correctAnswer = correctMatch[1].trim();
+                    } else if (text.includes('正确答案')) {
+                        // 兜底：仅有"正确答案"字样但无冒号的情况
+                        correctAnswer = text.replace(/正确答案/, '').replace(/^[：:\s]+/, '').trim();
+                    }
+                    if (userMatch) {
+                        userAnswer = userMatch[1].trim();
+                    } else if (text.includes('你的答案')) {
+                        userAnswer = text.replace(/你的答案/, '').replace(/^[：:\s]+/, '').trim();
                     }
                 } catch (e) {
                 }
@@ -390,15 +416,20 @@ function collectQuestionElement(questionEl) {
         try {
             const optionsContainer = questionEl.querySelector(OPTIONS_SELECTORS.join(','));
             if (optionsContainer) {
-                const optionElements = optionsContainer.querySelectorAll('.options, .aWFalse, .aWtrue');
+                const optionElements = optionsContainer.querySelectorAll(OPTION_ITEM_SELECTORS);
                 optionElements.forEach((optionElement) => {
                     try {
-                        const optionLabelElement = optionElement.querySelector('.awoption');
-                        const contentElement = optionElement.querySelector('.content .ql-editor');
+                        const optionLabelElement = optionElement.querySelector(OPTION_LABEL_SELECTORS);
+                        const contentElement = optionElement.querySelector(OPTION_CONTENT_SELECTORS);
                         if (optionLabelElement && contentElement) {
                             const optionLabel = optionLabelElement.textContent.trim();
                             const optionContent = contentElement.textContent.trim();
                             options.push(`${optionLabel} ${optionContent}`);
+                        } else {
+                            const fullText = optionElement.textContent.trim();
+                            if (fullText && fullText.length > 0 && fullText.length < 200) {
+                                options.push(fullText);
+                            }
                         }
                     } catch (e) {
                     }
@@ -430,7 +461,8 @@ function collectQuestionElement(questionEl) {
             correct_answer: correctAnswer,
             user_answer: userAnswer,
             category: category,
-            analysis: analysis
+            analysis: analysis,
+            source_url: window.location.href  // 记录题目来源页，便于追溯
         };
     } catch (error) {
         console.error('采集单道题目失败:', error);
