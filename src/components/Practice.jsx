@@ -1,11 +1,19 @@
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'react-router-dom';
+import {
+  fetchAPI,
+  getUserId,
+  getFeatureFlags,
+  getErrorPatterns,
+  submitPractice,
+  submitRealExamPractice,
+  submitReflection
+} from '../utils/api';
 
 function Practice() {
   const [searchParams] = useSearchParams();
   const initialMode = searchParams.get('mode') || 'today';
   const [mode, setMode] = useState(['today', 'recommend', 'random', 'real-exam'].includes(initialMode) ? initialMode : 'today');
-  const [userId, setUserId] = useState('');
   const [questions, setQuestions] = useState([]);
   const [currentIndex, setCurrentIndex] = useState(0);
   const [selectedAnswer, setSelectedAnswer] = useState(null);
@@ -18,29 +26,22 @@ function Practice() {
   const [reflectionGateEnabled, setReflectionGateEnabled] = useState(false);
 
   useEffect(() => {
-    const stored = localStorage.getItem('ruankao_user_id');
-    if (stored) {
-      setUserId(stored);
-      fetchFeatureFlags(stored);
-      return;
+    // 首次访问时主动生成并写入 localStorage，便于 fetchAPI 自动读取
+    if (!localStorage.getItem('ruankao_user_id')) {
+      const generated = `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
+      localStorage.setItem('ruankao_user_id', generated);
     }
-    const generated = `u_${Date.now()}_${Math.random().toString(36).slice(2, 10)}`;
-    localStorage.setItem('ruankao_user_id', generated);
-    setUserId(generated);
-    fetchFeatureFlags(generated);
+    fetchFeatureFlags();
   }, []);
 
   useEffect(() => {
     fetchErrorPatterns();
-    if (userId) {
-      loadQuestions();
-    }
-  }, [mode, userId]);
+    loadQuestions();
+  }, [mode]);
 
-  const fetchFeatureFlags = async (id) => {
+  const fetchFeatureFlags = async () => {
     try {
-      const res = await fetch(`http://localhost:5002/api/feature-flags?user_id=${encodeURIComponent(id)}`);
-      const data = await res.json();
+      const data = await getFeatureFlags();
       setReflectionGateEnabled(Boolean(data?.reflection_gate?.enabled));
     } catch (e) {
       console.error('加载功能开关失败', e);
@@ -50,8 +51,7 @@ function Practice() {
 
   const fetchErrorPatterns = async () => {
     try {
-      const res = await fetch('http://localhost:5002/api/error-patterns');
-      const data = await res.json();
+      const data = await getErrorPatterns();
       setErrorPatterns(data.patterns || []);
     } catch (e) {
       console.error('加载错误模式失败', e);
@@ -61,13 +61,12 @@ function Practice() {
   const loadQuestions = async () => {
     setLoading(true);
     try {
-      let url = 'http://localhost:5002/api/practice/random?limit=10';
-      if (mode === 'today') url = 'http://localhost:5002/api/practice/today?limit=10';
-      if (mode === 'recommend') url = 'http://localhost:5002/api/practice/recommend';
-      if (mode === 'real-exam') url = 'http://localhost:5002/api/practice/real-exam?limit=10';
+      let url = '/api/practice/random?limit=10';
+      if (mode === 'today') url = '/api/practice/today?limit=10';
+      if (mode === 'recommend') url = '/api/practice/recommend';
+      if (mode === 'real-exam') url = '/api/practice/real-exam?limit=10';
 
-      const res = await fetch(url);
-      const data = await res.json();
+      const data = await fetchAPI(url);
 
       setQuestions(data.questions || []);
       setCurrentIndex(0);
@@ -95,22 +94,17 @@ function Practice() {
 
     try {
       const isRealExam = mode === 'real-exam' || question.source === 'real_exam';
-      const submitUrl = isRealExam
-        ? 'http://localhost:5002/api/practice/submit-real-exam'
-        : 'http://localhost:5002/api/practice/submit';
-      const res = await fetch(submitUrl, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          question_id: question.id,
-          answer: selectedAnswer,
-          error_pattern_id: selectedPattern,
-          time_spent: 0,
-          user_id: userId
-        })
-      });
+      const payload = {
+        question_id: question.id,
+        answer: selectedAnswer,
+        error_pattern_id: selectedPattern,
+        time_spent: 0,
+        user_id: getUserId()
+      };
+      const result = isRealExam
+        ? await submitRealExamPractice(payload)
+        : await submitPractice(payload);
 
-      const result = await res.json();
       setPracticeResult(result);
       setShowResult(true);
       setStats((prev) => ({
@@ -137,19 +131,12 @@ function Practice() {
     }
 
     try {
-      const res = await fetch('http://localhost:5002/api/practice/reflection', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          attempt_id: practiceResult.attempt_id,
-          question_id: currentQuestion.id,
-          error_pattern_id: selectedPattern,
-          user_id: userId
-        })
+      await submitReflection({
+        attempt_id: practiceResult.attempt_id,
+        question_id: currentQuestion.id,
+        error_pattern_id: selectedPattern,
+        user_id: getUserId()
       });
-      if (!res.ok) {
-        throw new Error('submit reflection failed');
-      }
       return true;
     } catch (error) {
       console.error('提交反思失败:', error);
