@@ -6490,10 +6490,10 @@ def get_ability_radar():
     user_id = get_user_id()
     with get_db_conn() as conn:
         cursor = conn.cursor()
-        # 取顶层章节（parent_id IS NULL 或 id=parent_id）
+        # 取顶层章节（parent_id IS NULL），过滤 is_active=0 的测试残留
         cursor.execute('''
             SELECT id, name, category FROM knowledge_points
-            WHERE parent_id IS NULL ORDER BY id
+            WHERE parent_id IS NULL AND is_active = 1 ORDER BY id
         ''')
         top_chapters = [dict(row) for row in cursor.fetchall()]
 
@@ -6724,7 +6724,7 @@ def get_learning_path_recommend():
             LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
             LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
             LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
-            WHERE kp.parent_id IS NOT NULL
+            WHERE kp.parent_id IS NOT NULL AND kp.is_active = 1
             GROUP BY kp.id
             HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 0.6)
             ORDER BY pending_wrong DESC, (uc.mastery_score IS NULL) DESC, uc.mastery_score ASC
@@ -6892,7 +6892,7 @@ def get_learning_report():
             LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
             LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
             LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
-            WHERE kp.parent_id IS NOT NULL
+            WHERE kp.parent_id IS NOT NULL AND kp.is_active = 1
             GROUP BY kp.id
             HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 0.6)
             ORDER BY pending DESC, uc.mastery_score ASC
@@ -7009,7 +7009,7 @@ def export_learning_report():
             LEFT JOIN user_cognition uc ON kp.id = uc.kp_id AND uc.user_id = ?
             LEFT JOIN question_mapping qm ON qm.kp_id = kp.id
             LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
-            WHERE kp.parent_id IS NOT NULL
+            WHERE kp.parent_id IS NOT NULL AND kp.is_active = 1
             GROUP BY kp.id HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
             ORDER BY wrong_count DESC LIMIT 5
         ''', (user_id, user_id))
