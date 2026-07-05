@@ -6509,7 +6509,8 @@ def get_ability_radar():
             pending_wrong = wrong_stats['pending_wrong'] or 0
 
             coverage = round(visited / total_kps * 100, 1) if total_kps > 0 else 0
-            mastery = round(avg_mastery, 1)
+            # mastery_score 在 user_cognition 中存储为 0-1 小数，统一转为 0-100 百分比
+            mastery = round(avg_mastery * 100, 1)
             # 错题攻克率：已掌握错题 / 总错题
             wrong_mastered_rate = round((total_wrong - pending_wrong) / total_wrong * 100, 1) if total_wrong > 0 else 0
 
@@ -6694,7 +6695,7 @@ def get_learning_path_recommend():
             LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
             WHERE kp.parent_id IS NOT NULL
             GROUP BY kp.id
-            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
+            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 0.6)
             ORDER BY pending_wrong DESC, (uc.mastery_score IS NULL) DESC, uc.mastery_score ASC
             LIMIT ?
         ''', (user_id, user_id, limit * 2))
@@ -6703,6 +6704,9 @@ def get_learning_path_recommend():
         # 2. 对每个薄弱知识点，找关联教材章节与相邻知识点
         recommendations = []
         for kp in weak_kps[:limit]:
+            # mastery_score 在 DB 中为 0-1 小数，对外统一转为 0-100 百分比
+            if kp.get('mastery_score') is not None:
+                kp['mastery_score'] = round(kp['mastery_score'] * 100, 1)
             rec = {
                 'knowledge_point': kp,
                 'reason': '',
@@ -6729,13 +6733,18 @@ def get_learning_path_recommend():
             # 找同级相邻知识点（同 parent，已掌握的作为参考）
             if kp['parent_id']:
                 cursor.execute('''
-                    SELECT name, mastery_score FROM knowledge_points kp2
+                    SELECT name, uc.mastery_score FROM knowledge_points kp2
                     LEFT JOIN user_cognition uc ON kp2.id = uc.kp_id AND uc.user_id = ?
                     WHERE kp2.parent_id = ? AND kp2.id != ?
                     ORDER BY (uc.mastery_score IS NULL), uc.mastery_score DESC
                     LIMIT 3
                 ''', (user_id, kp['parent_id'], kp['id']))
-                siblings = [dict(r) for r in cursor.fetchall()]
+                siblings = []
+                for r in cursor.fetchall():
+                    d = dict(r)
+                    if d.get('mastery_score') is not None:
+                        d['mastery_score'] = round(d['mastery_score'] * 100, 1)
+                    siblings.append(d)
                 if siblings:
                     rec['siblings'] = siblings
 
@@ -6814,10 +6823,12 @@ def get_learning_report():
         ''', (user_id,))
         chapters = []
         for r in cursor.fetchall():
+            # mastery_score 在 DB 中为 0-1 小数，对外统一转为 0-100 百分比
+            ms = r['mastery_score']
             chapters.append({
                 'name': r['name'],
                 'knowledge_point_count': r['kp_count'],
-                'mastery_score': r['mastery_score']
+                'mastery_score': round(ms * 100, 1) if ms is not None else None
             })
 
         # 3. 错题分类聚合
@@ -6852,11 +6863,17 @@ def get_learning_report():
             LEFT JOIN wrong_questions wq ON qm.question_id = wq.id AND wq.user_id = ?
             WHERE kp.parent_id IS NOT NULL
             GROUP BY kp.id
-            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 60)
+            HAVING wrong_count > 0 OR (uc.mastery_score IS NOT NULL AND uc.mastery_score < 0.6)
             ORDER BY pending DESC, uc.mastery_score ASC
             LIMIT 5
         ''', (user_id, user_id))
-        weak_kps = [dict(r) for r in cursor.fetchall()]
+        weak_kps = []
+        for r in cursor.fetchall():
+            d = dict(r)
+            # mastery_score 0-1 → 0-100
+            if d.get('mastery_score') is not None:
+                d['mastery_score'] = round(d['mastery_score'] * 100, 1)
+            weak_kps.append(d)
 
         # 6. 近 N 天学习趋势
         cursor.execute('''
