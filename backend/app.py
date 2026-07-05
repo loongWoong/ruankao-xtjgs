@@ -2378,12 +2378,13 @@ def add_practice_session():
                     score = ?,
                     accuracy = ?,
                     time_spent = ?,
+                    started_at = COALESCE(?, started_at),
                     submitted_at = ?,
                     raw_data = COALESCE(?, raw_data)
                 WHERE id = ?
             ''', (
                 clean_paper_name, total_questions, correct_count, wrong_count,
-                score, accuracy, time_spent, submitted_at, raw_data_str, existing_id
+                score, accuracy, time_spent, started_at, submitted_at, raw_data_str, existing_id
             ))
             session_id = existing_id
             is_new = False

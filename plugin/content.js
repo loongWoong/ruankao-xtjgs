@@ -906,9 +906,12 @@ function collectPracticeSession() {
                 continue;
             }
         }
-        // 兜底：用 document.title
+        // 兜底：用 document.title，但过滤通用无意义标题
         if (!paperName) {
-            paperName = document.title || '';
+            const title = (document.title || '').trim();
+            const genericKeywords = ['软考达人', '在线题库', '软考', '题库', '首页'];
+            const isGeneric = !title || genericKeywords.some(kw => title.includes(kw)) || title.length < 4;
+            paperName = isGeneric ? '' : title;
         }
 
         // 2. 从汇总区提取得分/正确数/错误数/总数/用时
@@ -926,9 +929,11 @@ function collectPracticeSession() {
                 continue;
             }
         }
-        // 兜底：整页 body 文本用于正则提取
+        // 兜底：限定到主内容区，避免误匹配导航/广告/页脚
         if (!summaryText) {
-            summaryText = document.body ? document.body.innerText.substring(0, 5000) : '';
+            const mainEl = document.querySelector('main, #app, .main-content, .content, #content, .exam-content, .paper-content');
+            const scopeEl = mainEl || document.body;
+            summaryText = scopeEl ? scopeEl.innerText.substring(0, 3000) : '';
         }
 
         // 3. 正则提取各数值字段（兼容多种表述）
@@ -995,12 +1000,31 @@ function collectPracticeSession() {
             totalQuestions = correctCount + wrongCount;
         }
 
+        // 合理性校验：限制异常值（避免误匹配导致脏数据）
+        if (totalQuestions > 500) totalQuestions = 0;  // 单次练习不会超过 500 题
+        if (correctCount > totalQuestions && totalQuestions > 0) correctCount = totalQuestions;
+        if (wrongCount > totalQuestions && totalQuestions > 0) wrongCount = totalQuestions;
+        if (score > 150) score = 0;  // 软考满分 75，留余量
+        if (timeSpent > 600) timeSpent = 0;  // 超过 10 小时视为误匹配
+
         // 4. 校验：至少要有总题数或得分之一
         if (totalQuestions <= 0 && score <= 0) {
             return {
                 success: false,
                 error: '未识别到练习结果汇总信息（需在交卷结果页使用）'
             };
+        }
+
+        // started_at：从 sessionStorage 读取练习开始时间（SPA 导航时记录）
+        let startedAt = null;
+        try {
+            startedAt = sessionStorage.getItem('practice_started_at');
+        } catch (e) {
+        }
+        // 兜底：用 submitted_at - time_spent 推算
+        if (!startedAt && timeSpent > 0) {
+            const startedMs = Date.now() - timeSpent * 60 * 1000;
+            startedAt = new Date(startedMs).toISOString();
         }
 
         const sessionData = {
@@ -1012,6 +1036,7 @@ function collectPracticeSession() {
             accuracy: accuracy,
             time_spent: timeSpent,
             source_url: window.location.href,
+            started_at: startedAt,
             submitted_at: new Date().toISOString(),
             raw_data: {
                 title: document.title,
@@ -1162,6 +1187,14 @@ function setupSpaNavigationHandler() {
                 // 重置采集状态，等待新页面 DOM 渲染后再检测
                 currentQuestionHash = '';
                 answerRevealed = false;
+                // 记录练习开始时间（用于 practice_session 的 started_at 字段）
+                // 当导航到包含 exam/practice/test 的路径时记录
+                try {
+                    if (/\/(exam|practice|test|paper|mock)/i.test(newUrl)) {
+                        sessionStorage.setItem('practice_started_at', new Date().toISOString());
+                    }
+                } catch (e) {
+                }
                 setTimeout(function() {
                     currentQuestionHash = getCurrentQuestionHash();
                     checkAnswerRevealed();
