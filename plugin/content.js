@@ -140,7 +140,9 @@ function generateQuestionId(questionText) {
         hash = ((hash << 5) - hash) + char;
         hash = hash & hash;
     }
-    return 'q_' + Math.abs(hash) + '_' + Date.now().toString(36);
+    // 只基于题目文本哈希，不加 Date.now()，保证同一道题每次生成相同 ID
+    // 后端据此做 UPSERT 去重，避免重复采集
+    return 'q_' + Math.abs(hash);
 }
 
 function findQuestionTitleElement() {
