@@ -136,7 +136,19 @@ function collectCurrentQuestion() {
 
         console.log('采集的数据:', JSON.stringify(questionData, null, 2));
 
-        return { success: true, data: questionData, pendingSend: true };
+        // 数据质量校验：题干过短 或 既无正确答案也无用户答案时，标记为低质量
+        const warnings = [];
+        if (questionText.length < 10) {
+            warnings.push('题干过短');
+        }
+        if (!correctAnswer && !userAnswer) {
+            warnings.push('未识别到答案（可能在答题中，建议交卷后采集）');
+        }
+        if (options.length === 0) {
+            warnings.push('未识别到选项');
+        }
+
+        return { success: true, data: questionData, pendingSend: true, warnings: warnings };
     } catch (error) {
         console.error('采集题目失败:', error);
         return { success: false, error: error.message };
@@ -970,6 +982,26 @@ function checkNewQuestion() {
     }
 }
 
+// 检测答案是否已揭示（.right-key 出现意味着已交卷/查看解析）
+let answerRevealed = false;
+function checkAnswerRevealed() {
+    try {
+        const rightKeyEl = document.querySelector('.right-key, [class*="right-key"]');
+        if (rightKeyEl && rightKeyEl.textContent.trim().length > 0) {
+            if (!answerRevealed) {
+                answerRevealed = true;
+                console.log('检测到答案已揭示');
+                showNotification('答案已揭示，按 Ctrl+Shift+C 采集本题', 'info');
+            }
+        } else {
+            // 答案区消失（切到新题），重置标志
+            answerRevealed = false;
+        }
+    } catch (e) {
+        console.warn('检查答案揭示失败:', e);
+    }
+}
+
 function initMutationObserver() {
     try {
         if (observer) {
@@ -977,15 +1009,28 @@ function initMutationObserver() {
         }
 
         observer = new MutationObserver(function(mutations) {
-            let shouldCheck = false;
+            let shouldCheckQuestion = false;
+            let shouldCheckAnswer = false;
             for (const mutation of mutations) {
                 if (mutation.type === 'childList' && mutation.addedNodes.length > 0) {
-                    shouldCheck = true;
-                    break;
+                    shouldCheckQuestion = true;
+                    // 检查新增节点是否包含答案区
+                    for (const node of mutation.addedNodes) {
+                        if (node.nodeType === 1) {
+                            if (node.matches && (node.matches('.right-key, [class*="right-key"]') ||
+                                node.querySelector && node.querySelector('.right-key, [class*="right-key"]'))) {
+                                shouldCheckAnswer = true;
+                                break;
+                            }
+                        }
+                    }
                 }
             }
-            if (shouldCheck) {
+            if (shouldCheckQuestion) {
                 checkNewQuestion();
+            }
+            if (shouldCheckAnswer) {
+                checkAnswerRevealed();
             }
         });
 
@@ -1000,8 +1045,50 @@ function initMutationObserver() {
     }
 }
 
+// SPA 导航处理：ruankaodaren 可能为单页应用，URL 变化时不重新加载页面
+// 监听 pushState/replaceState/popstate，URL 变化后重置采集状态
+let lastUrl = window.location.href;
+function setupSpaNavigationHandler() {
+    try {
+        const onUrlChange = function() {
+            const newUrl = window.location.href;
+            if (newUrl !== lastUrl) {
+                console.log('检测到 URL 变化:', lastUrl, '->', newUrl);
+                lastUrl = newUrl;
+                // 重置采集状态，等待新页面 DOM 渲染后再检测
+                currentQuestionHash = '';
+                answerRevealed = false;
+                setTimeout(function() {
+                    currentQuestionHash = getCurrentQuestionHash();
+                    checkAnswerRevealed();
+                }, 1500);
+            }
+        };
+
+        // 劫持 history.pushState / replaceState
+        const originalPushState = history.pushState;
+        const originalReplaceState = history.replaceState;
+        history.pushState = function() {
+            const result = originalPushState.apply(this, arguments);
+            onUrlChange();
+            return result;
+        };
+        history.replaceState = function() {
+            const result = originalReplaceState.apply(this, arguments);
+            onUrlChange();
+            return result;
+        };
+        window.addEventListener('popstate', onUrlChange);
+
+        console.log('SPA 导航处理器已启动');
+    } catch (e) {
+        console.error('初始化 SPA 导航处理器失败:', e);
+    }
+}
+
 console.log('软考达人错题采集插件已加载');
 console.log('提示：按 Ctrl+Shift+C 可快速采集当前题目');
 
 currentQuestionHash = getCurrentQuestionHash();
 initMutationObserver();
+setupSpaNavigationHandler();

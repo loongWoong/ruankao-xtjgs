@@ -170,7 +170,12 @@ document.getElementById('collect').addEventListener('click', function() {
 
                 if (response) {
                     if (response.success && response.data) {
-                        showStatus('采集成功，正在发送到服务器...', 'info');
+                        // 展示数据质量警告（若有）
+                        if (response.warnings && response.warnings.length > 0) {
+                            showStatus('采集到数据但存在警告：' + response.warnings.join('；'), 'info');
+                        } else {
+                            showStatus('采集成功，正在发送到服务器...', 'info');
+                        }
                         chrome.runtime.sendMessage({
                             action: 'sendToBackend',
                             data: response.data
