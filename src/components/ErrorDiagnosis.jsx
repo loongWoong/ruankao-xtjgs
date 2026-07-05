@@ -115,12 +115,12 @@ function ErrorDiagnosis() {
                   <div style={{ width: `${(cat.count / maxCount) * 100}%`, height: '100%', background: info.color }} />
                 </div>
                 <div style={{ display: 'flex', flexWrap: 'wrap', gap: '0.4rem' }}>
-                  {cat.tags.map((t, i) => (
+                  {(cat.tags || []).map((t, i) => (
                     <span key={i} style={{
                       padding: '2px 8px', background: info.bgColor, color: info.color,
                       borderRadius: '4px', fontSize: '0.8rem'
                     }}>
-                      {t.name} ({t.count})
+                      {t.name || '未命名'} ({t.count || 0})
                     </span>
                   ))}
                 </div>

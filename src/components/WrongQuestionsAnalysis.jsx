@@ -23,7 +23,13 @@ function WrongQuestionsAnalysis() {
           getWrongQuestions({ limit: 50 }).catch(() => ({ items: [] }))
         ]);
         if (cancelled) return;
-        setAnalysisData(analysis || { total_wrong: 0, category_stats: [], daily_stats: [] });
+        // 合并默认结构，避免 analysis 为部分对象时丢失 category_stats/daily_stats 默认值导致崩页
+        setAnalysisData({
+          total_wrong: 0,
+          category_stats: [],
+          daily_stats: [],
+          ...(analysis || {})
+        });
         setWrongQuestions(questionsData?.items || []);
       } catch (e) {
         if (!cancelled) setError(e.message || '加载分析数据失败');
@@ -63,7 +69,7 @@ function WrongQuestionsAnalysis() {
         </div>
         <div className="stat-card">
           <div className="stat-card-title">涉及分类</div>
-          <div className="stat-card-value" style={{ color: '#667eea' }}>{analysisData.category_stats.length}</div>
+          <div className="stat-card-value" style={{ color: '#667eea' }}>{(analysisData.category_stats || []).length}</div>
           <div className="stat-card-sub">个</div>
         </div>
         <div className="stat-card">
@@ -77,15 +83,15 @@ function WrongQuestionsAnalysis() {
 
       <div className="section-card">
         <h3 className="section-title"><span>🎯</span>认知重点分析（按分类）</h3>
-        {analysisData.category_stats.length > 0 ? (
-          analysisData.category_stats.map((item, index) => (
+        {(analysisData.category_stats || []).length > 0 ? (
+          (analysisData.category_stats || []).map((item, index) => (
             <div key={index} style={{ padding: '0.75rem 0', borderBottom: '1px solid #f0f0f0' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '0.4rem' }}>
-                <span style={{ fontWeight: 600, color: '#333' }}>{item.category}</span>
-                <span style={{ color: '#888', fontSize: '0.85rem' }}>{item.count} 题 · 占比 {item.percentage}%</span>
+                <span style={{ fontWeight: 600, color: '#333' }}>{item.category || '未分类'}</span>
+                <span style={{ color: '#888', fontSize: '0.85rem' }}>{item.count || 0} 题 · 占比 {item.percentage || 0}%</span>
               </div>
               <div style={{ background: '#f0f0f0', borderRadius: '4px', height: '8px', overflow: 'hidden' }}>
-                <div style={{ width: `${item.percentage}%`, background: '#f44336', height: '100%' }} />
+                <div style={{ width: `${Math.min(100, Math.max(0, item.percentage || 0))}%`, background: '#f44336', height: '100%' }} />
               </div>
             </div>
           ))
