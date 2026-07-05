@@ -58,6 +58,11 @@ function MockExam() {
       if (examEndAt > 0) {
         const remaining = Math.max(0, Math.floor((examEndAt - Date.now()) / 1000));
         setTimeLeft(remaining);
+        // 倒计时归零时在回调内立即触发自动提交，避免依赖 useEffect 重新执行
+        if (remaining <= 0) {
+          clearInterval(timer);
+          handleSubmit();
+        }
       }
     }, 1000);
 
@@ -93,6 +98,8 @@ function MockExam() {
       alert('请输入考试标题');
       return;
     }
+    if (submitting) return;
+    setSubmitting(true);
     try {
       const data = await createMockExam({
         title: createForm.title,
@@ -109,6 +116,8 @@ function MockExam() {
     } catch (e) {
       console.error('创建考试失败', e);
       alert('创建考试失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -168,9 +177,11 @@ function MockExam() {
   };
 
   const handleRetryExam = async (examId) => {
+    if (submitting) return;
     if (!window.confirm('将基于本次考试配置创建一场新的模考，是否继续？')) {
       return;
     }
+    setSubmitting(true);
     try {
       const detail = await getMockExam(examId);
       const data = await createMockExam({
@@ -187,6 +198,8 @@ function MockExam() {
     } catch (e) {
       console.error('重新考试失败', e);
       alert('重新考试失败');
+    } finally {
+      setSubmitting(false);
     }
   };
 
@@ -413,8 +426,8 @@ function MockExam() {
               <button className="btn btn-secondary" onClick={() => setShowCreateModal(false)}>
                 取消
               </button>
-              <button className="btn btn-primary" onClick={handleCreateExam}>
-                创建
+              <button className="btn btn-primary" onClick={handleCreateExam} disabled={submitting}>
+                {submitting ? '创建中...' : '创建'}
               </button>
             </div>
           </div>
@@ -425,7 +438,15 @@ function MockExam() {
 
   const renderExamView = () => {
     if (!examData || questions.length === 0) {
-      return <div className="empty-state">加载中...</div>;
+      return (
+        <div className="empty-state">
+          <div className="empty-state-icon">📭</div>
+          <p>{examData ? '题目加载失败或题库不足，无法开始考试' : '加载中...'}</p>
+          <button className="btn btn-secondary" style={{ marginTop: '1rem' }} onClick={() => { setView('list'); setExamData(null); }}>
+            返回列表
+          </button>
+        </div>
+      );
     }
 
     const currentQuestion = questions[currentIndex];
