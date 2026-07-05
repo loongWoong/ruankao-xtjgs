@@ -420,7 +420,7 @@ def ensure_schema():
                 back TEXT NOT NULL,
                 difficulty INTEGER DEFAULT 3,
                 srs_stage INTEGER DEFAULT 0,
-                next_review_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+                next_review_at DATETIME DEFAULT (datetime('now', '+1 day')),
                 last_reviewed_at DATETIME,
                 review_count INTEGER DEFAULT 0,
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -697,7 +697,7 @@ def _init_default_flashcards(cursor):
     for kp_id, front, back, difficulty in default_cards:
         cursor.execute('''
             INSERT INTO flashcards (user_id, kp_id, front, back, difficulty, srs_stage, next_review_at)
-            VALUES (?, ?, ?, ?, ?, 0, datetime('now'))
+            VALUES (?, ?, ?, ?, ?, 0, datetime('now', '+1 day'))
         ''', ('system_default', kp_id, front, back, difficulty))
 
 
@@ -4664,8 +4664,8 @@ def create_flashcard():
         cursor = conn.cursor()
         cursor.execute('''
             INSERT INTO flashcards (
-                user_id, kp_id, front, back, difficulty
-            ) VALUES (?, ?, ?, ?, ?)
+                user_id, kp_id, front, back, difficulty, next_review_at
+            ) VALUES (?, ?, ?, ?, ?, datetime('now', '+1 day'))
         ''', (
             user_id,
             kp_id if kp_id else None,
