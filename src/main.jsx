@@ -24,6 +24,7 @@ import AbilityRadar from './components/AbilityRadar.jsx'
 import ErrorDiagnosis from './components/ErrorDiagnosis.jsx'
 import LearningPath from './components/LearningPath.jsx'
 import LearningReport from './components/LearningReport.jsx'
+import Notebook from './components/Notebook.jsx'
 
 ReactDOM.createRoot(document.getElementById('root')).render(
   <React.StrictMode>
@@ -50,6 +51,7 @@ ReactDOM.createRoot(document.getElementById('root')).render(
           <Route path="/diagnosis" element={<ErrorDiagnosis />} />
           <Route path="/learning-path" element={<LearningPath />} />
           <Route path="/report" element={<LearningReport />} />
+          <Route path="/notebook" element={<Notebook />} />
         </Routes>
       </App>
     </Router>
