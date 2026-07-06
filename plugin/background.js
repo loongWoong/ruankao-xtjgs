@@ -483,6 +483,28 @@ async function appendSessionHistory(entry) {
     try {
         const result = await chrome.storage.local.get(SESSION_HISTORY_KEY);
         const history = result[SESSION_HISTORY_KEY] || [];
+
+        // 34D: 去重 — 同一练习会话（按 paper_name + submitted_at 唯一）只保留最新状态
+        // 原 bug：首次发送失败时写入 synced=false 条目，processPendingQueue 重试成功后
+        // 又写入 synced=true 条目，导致历史列表出现重复（一条"待同步" + 一条"已同步"）
+        if (entry.paper_name && entry.submitted_at) {
+            const dedupKey = entry.paper_name + '|' + entry.submitted_at;
+            for (let i = 0; i < history.length; i++) {
+                const h = history[i];
+                if (h && h.paper_name === entry.paper_name && h.submitted_at === entry.submitted_at) {
+                    // 已存在：替换为最新状态（保留原 timestamp 便于排序）
+                    entry.timestamp = h.timestamp || Date.now();
+                    history.splice(i, 1);
+                    break;
+                }
+            }
+        }
+
+        // 新条目写入 timestamp（若未由调用方/去重逻辑设置）
+        if (!entry.timestamp) {
+            entry.timestamp = Date.now();
+        }
+
         history.unshift(entry);
         if (history.length > SESSION_HISTORY_LIMIT) {
             history.length = SESSION_HISTORY_LIMIT;

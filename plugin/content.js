@@ -775,6 +775,21 @@ async function collectAllWrongQuestions() {
             }
         }
 
+        // 34C: 若找到容器但全部提取失败（可能题目折叠未展开），给出有针对性的提示
+        // 而非通用的"采集失败：未知错误"，引导用户展开题目后重试
+        if (collectedQuestions.length === 0) {
+            const msg = `找到 ${questionElements.length} 个题目容器但提取文本均失败，` +
+                `可能是题目折叠未展开，请展开所有题目后重试`;
+            console.warn(msg);
+            try { showNotification(msg, 'error'); } catch (e) { }
+            return {
+                success: false,
+                error: msg,
+                containerCount: questionElements.length,
+                collectedCount: 0
+            };
+        }
+
         // 阶段二：批量发送到后端（一次请求，单连接提交）
         let successCount = 0;
         let failCount = collectFailCount;
@@ -1095,6 +1110,10 @@ function collectPracticeSession() {
         } else if (totalQuestions > 0 && correctCount > 0) {
             accuracy = correctCount / totalQuestions;
         }
+        // 34B: 边界防护 — accuracy 必须在 [0, 1] 区间
+        // 兜底防止异常值入库（如正则误匹配、correctCount>totalQuestions 等）
+        if (accuracy < 0) accuracy = 0;
+        if (accuracy > 1) accuracy = 1;
 
         // 总题数兜底：若未匹配到，但 correct+wrong>0，则用其和
         if (totalQuestions <= 0 && (correctCount + wrongCount) > 0) {
