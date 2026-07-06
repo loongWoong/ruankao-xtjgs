@@ -1110,6 +1110,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     } else if (request.action === 'collectPracticeSession') {
         const result = collectPracticeSession();
         sendResponse(result);
+    } else {
+        // 未知 action 显式返回错误，避免调用方 callback 永不触发
+        console.warn('content.js 收到未知 action:', request.action);
+        sendResponse({ success: false, error: 'Unknown action: ' + (request.action || '(empty)') });
     }
 
     return true;
