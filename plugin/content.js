@@ -639,15 +639,24 @@ async function collectAllWrongQuestions() {
                     } catch (e) {
                     }
                     if (!container) {
-                        // 回退：向上找直到容器包含选项或答案区（说明是完整题目）
+                        // 回退：只向上查找有限层级（最多 3 级），避免扁平列表场景下
+                        // 多个 title 元素 closest 到同一个外层列表容器，导致只采到第一道题
                         container = titleEl.parentElement;
+                        let level = 0;
                         try {
-                            while (container && container.parentElement) {
+                            while (container && container.parentElement && level < 3) {
                                 if (container.querySelector(OPTIONS_SELECTORS.join(',')) ||
                                     container.querySelector('.right-key, [class*="right-key"]')) {
                                     break;
                                 }
                                 container = container.parentElement;
+                                level++;
+                            }
+                            // 若向上 3 级仍未找到含选项/答案的容器，回退用 title 的父元素
+                            // （至少保证每道题有独立采集起点，而不是共用最外层）
+                            if (level >= 3 && !container.querySelector(OPTIONS_SELECTORS.join(',')) &&
+                                !container.querySelector('.right-key, [class*="right-key"]')) {
+                                container = titleEl.parentElement || titleEl;
                             }
                         } catch (e) {
                         }
@@ -703,11 +712,12 @@ async function collectAllWrongQuestions() {
                 collectFailCount++;
             }
 
-            // sendProgressUpdate 已删除（background 无 handler，属于死代码）
-
-            try {
-                showNotification(`采集中... ${i + 1}/${questionElements.length}`, 'info');
-            } catch (e) {
+            // 进度通知节流：每 10 道或最后一道才更新，避免大批量采集时通知闪烁
+            if ((i + 1) % 10 === 0 || i + 1 === questionElements.length) {
+                try {
+                    showNotification(`采集中... ${i + 1}/${questionElements.length}`, 'info');
+                } catch (e) {
+                }
             }
         }
 
@@ -1160,6 +1170,11 @@ function initMutationObserver() {
             observer.disconnect();
         }
 
+        // 防抖：DOM 频繁变动时（如动画、下拉菜单）避免高频率调用 checkNewQuestion
+        let debounceTimer = null;
+        let pendingCheckQuestion = false;
+        let pendingCheckAnswer = false;
+
         observer = new MutationObserver(function(mutations) {
             let shouldCheckQuestion = false;
             let shouldCheckAnswer = false;
@@ -1178,12 +1193,22 @@ function initMutationObserver() {
                     }
                 }
             }
-            if (shouldCheckQuestion) {
-                checkNewQuestion();
-            }
-            if (shouldCheckAnswer) {
-                checkAnswerRevealed();
-            }
+            if (shouldCheckQuestion) pendingCheckQuestion = true;
+            if (shouldCheckAnswer) pendingCheckAnswer = true;
+
+            // 500ms 防抖：合并短时间内的多次 DOM 变动为一次检查
+            if (debounceTimer) clearTimeout(debounceTimer);
+            debounceTimer = setTimeout(function() {
+                debounceTimer = null;
+                if (pendingCheckQuestion) {
+                    pendingCheckQuestion = false;
+                    try { checkNewQuestion(); } catch (e) { console.warn('checkNewQuestion 失败:', e); }
+                }
+                if (pendingCheckAnswer) {
+                    pendingCheckAnswer = false;
+                    try { checkAnswerRevealed(); } catch (e) { console.warn('checkAnswerRevealed 失败:', e); }
+                }
+            }, 500);
         });
 
         observer.observe(document.body, {
@@ -1239,6 +1264,8 @@ function setupSpaNavigationHandler() {
             return result;
         };
         window.addEventListener('popstate', onUrlChange);
+        // 补充 hashchange 监听：部分 SPA 使用 hash 路由（如 #/exam/123）
+        window.addEventListener('hashchange', onUrlChange);
 
         console.log('SPA 导航处理器已启动');
     } catch (e) {
