@@ -265,6 +265,15 @@ async function sendToBackend(data, skipDedup = false, skipQueueOnFail = false) {
 
             lastError = new Error('HTTP ' + response.status);
             console.warn(`发送失败，第 ${attempt + 1} 次尝试:`, lastError.message);
+
+            // 33D: HTTP 4xx (客户端错误) 不再重试，重试也是同样结果，浪费请求
+            // 典型场景：400 (题干空/字段非法)、401 (user_id 无效)、422 (参数错误)
+            // 429 (限流) 虽是 4xx 但应重试，单独豁免
+            // 5xx (服务端错误) 仍按原逻辑重试
+            if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                console.warn(`客户端错误 ${response.status}，不再重试`);
+                break;
+            }
         } catch (e) {
             lastError = e;
             console.warn(`发送失败，第 ${attempt + 1} 次尝试:`, e.message);
@@ -363,6 +372,12 @@ async function sendBatchToBackend(items) {
                 }
 
                 lastError = new Error('HTTP ' + response.status);
+
+                // 33D: HTTP 4xx (客户端错误) 不再重试（429 限流除外）
+                if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                    console.warn(`批量发送客户端错误 ${response.status}，不再重试`);
+                    break;
+                }
             } catch (e) {
                 lastError = e;
             }
@@ -433,6 +448,12 @@ async function sendSessionToBackend(sessionData, skipQueueOnFail = false, skipHi
 
             lastError = new Error('HTTP ' + response.status);
             console.warn(`练习会话发送失败，第 ${attempt + 1} 次尝试:`, lastError.message);
+
+            // 33D: HTTP 4xx (客户端错误) 不再重试（429 限流除外）
+            if (response.status >= 400 && response.status < 500 && response.status !== 429) {
+                console.warn(`练习会话客户端错误 ${response.status}，不再重试`);
+                break;
+            }
         } catch (e) {
             lastError = e;
             console.warn(`练习会话发送失败，第 ${attempt + 1} 次尝试:`, e.message);

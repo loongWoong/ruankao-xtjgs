@@ -475,10 +475,10 @@ function extractAnswers(questionElement) {
                     // 填空题(中文/特殊字符如 TCP/IP)、多选题(A B D) 等所有题型。
                     // 旧正则 [A-Za-z0-9,，、\s]+ 会截断含 / ( ) - 等字符的答案。
                     if (text.includes('正确答案') && !correctAnswer) {
-                        correctAnswer = extractAfterLabel(text, '正确答案');
+                        correctAnswer = normalizeAnswer(extractAfterLabel(text, '正确答案'));
                     }
                     if (text.includes('你的答案') && !userAnswer) {
-                        userAnswer = extractAfterLabel(text, '你的答案');
+                        userAnswer = normalizeAnswer(extractAfterLabel(text, '你的答案'));
                     }
                 } catch (e) {
                 }
@@ -1307,9 +1307,14 @@ function setupSpaNavigationHandler() {
                 currentQuestionHash = '';
                 answerRevealed = false;
                 // 记录练习开始时间（用于 practice_session 的 started_at 字段）
-                // 当导航到包含 exam/practice/test 的路径时记录
+                // 仅在导航到练习/考试页（非结果页）时记录，避免导航到结果页时
+                // 覆盖真实的练习开始时间，导致 time_spent 计算错误
+                // 33B: 旧逻辑只要 URL 含 exam/practice/test 就刷新，结果页 URL 也
+                // 匹配（如 /exam/result/123），导致用户采集练习结果时 started_at
+                // 是进入结果页的时间，time_spent 被严重低估
                 try {
-                    if (/\/(exam|practice|test|paper|mock)/i.test(newUrl)) {
+                    if (/\/(exam|practice|test|paper|mock)/i.test(newUrl) &&
+                        !/\/(result|score|report|summary|analysis)/i.test(newUrl)) {
                         sessionStorage.setItem('practice_started_at', new Date().toISOString());
                     }
                 } catch (e) {
