@@ -4,12 +4,16 @@ document.addEventListener('DOMContentLoaded', function() {
     loadPendingQueueCount();
     loadSessionHistory();
     loadUserIdSetting();
+    loadDeadLetterCount();
 
     document.getElementById('retryQueueBtn').addEventListener('click', function() {
         retryPendingQueue();
     });
 
     document.getElementById('collectSession').addEventListener('click', collectPracticeSession);
+
+    // 35C: 死信清除按钮
+    document.getElementById('clearDeadLetterBtn').addEventListener('click', clearDeadLetters);
 
     // user_id 输入失焦时保存
     const userIdInput = document.getElementById('userIdInput');
@@ -36,6 +40,7 @@ document.addEventListener('DOMContentLoaded', function() {
         if (pollTickCount % 6 === 0) {
             loadStats();
             loadSessionHistory();
+            loadDeadLetterCount();
         }
     }, 5000);
 
@@ -475,7 +480,18 @@ function renderSessionHistory(items) {
         const name = (item.paper_name || '未命名练习').substring(0, 20);
         const scoreText = item.score > 0 ? item.score + '分' : Math.round((item.accuracy || 0) * 100) + '%';
         const correctText = item.total_questions > 0 ? (item.correct_count + '/' + item.total_questions) : '';
-        const syncIcon = item.synced ? '<span class="history-item-synced">✓</span>' : '<span class="history-item-unsynced">待同步</span>';
+        // 35D: synced 可能是 true / false / 'dead' 三态
+        //   true  → 已同步（绿 ✓）
+        //   false → 待同步（橙"待同步"）
+        //   'dead'→ 重试耗尽已丢弃（红"已丢弃"），用户需重新采集
+        let syncIcon;
+        if (item.synced === 'dead') {
+            syncIcon = '<span class="history-item-dead">已丢弃</span>';
+        } else if (item.synced) {
+            syncIcon = '<span class="history-item-synced">✓</span>';
+        } else {
+            syncIcon = '<span class="history-item-unsynced">待同步</span>';
+        }
         // D4: 展示相对时间，让用户知道这条记录是何时采集的
         const timeText = formatRelativeTime(item.synced_at || item.timestamp);
         return '<div class="history-item">' +
@@ -509,4 +525,52 @@ function escapeHtml(text) {
     const div = document.createElement('div');
     div.textContent = text;
     return div.innerHTML;
+}
+
+// 35C: 死信队列展示 — 重试耗尽或 4xx 不可重试错误导致的数据丢弃
+// popup 显示丢弃数量，用户可点击"清除"按钮清理
+function loadDeadLetterCount() {
+    try {
+        chrome.runtime.sendMessage({ action: 'getDeadLetterCount' }, function(response) {
+            if (chrome.runtime.lastError) {
+                return;
+            }
+            const count = (response && response.count) || 0;
+            updateDeadLetterDisplay(count);
+        });
+    } catch (e) {
+        console.error('加载死信数量失败:', e);
+    }
+}
+
+function updateDeadLetterDisplay(count) {
+    const info = document.getElementById('deadLetterInfo');
+    const text = document.getElementById('deadLetterText');
+    if (!info || !text) return;
+    if (count > 0) {
+        text.textContent = `丢弃：${count} 条（重试耗尽，需重新采集）`;
+        info.classList.add('visible');
+    } else {
+        info.classList.remove('visible');
+    }
+}
+
+function clearDeadLetters() {
+    try {
+        chrome.runtime.sendMessage({ action: 'clearDeadLetterQueue' }, function(response) {
+            if (chrome.runtime.lastError) {
+                showStatus('清除失败：' + chrome.runtime.lastError.message, 'error');
+                return;
+            }
+            if (response && response.success) {
+                updateDeadLetterDisplay(0);
+                showStatus('已清除死信记录', 'success');
+            } else {
+                showStatus('清除失败：' + (response ? response.error : '未知错误'), 'error');
+            }
+        });
+    } catch (e) {
+        console.error('清除死信失败:', e);
+        showStatus('清除失败：' + e.message, 'error');
+    }
 }

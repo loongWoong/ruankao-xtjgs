@@ -11,6 +11,8 @@ const ALARM_NAME = 'retry_pending_queue';
 const ALARM_INTERVAL = 1;  // Chrome MV3 alarms 最小周期为 1 分钟，低于 1 会被上取整
 const BATCH_CHUNK_SIZE = 200;
 const SESSION_HISTORY_LIMIT = 50;  // 提升上限：旧值 20 在用户一天多套练习时易丢失早期记录
+const DEAD_LETTER_QUEUE_KEY = 'dead_letter_queue';
+const DEAD_LETTER_LIMIT = 50;  // 死信上限：超过后丢弃最旧条目，防止 storage 无限增长
 
 // 读取 popup 配置的 user_id（缓存，避免每次发送都读 storage）
 let cachedUserId = '';
@@ -564,15 +566,41 @@ async function processPendingQueue() {
                     // 立即从 storage 移除该条目（按 queue_id 精确定位，无索引漂移风险）
                     await removeFromPendingQueueById(item.queue_id);
                 } else {
-                    // 递增 retryCount，超过阈值则移除（死信），避免永久失败项无限循环
-                    item.retryCount = (item.retryCount || 0) + 1;
-                    if (item.retryCount >= MAX_ITEM_RETRIES) {
-                        console.warn(`队列项 ${item.queue_id} 重试 ${item.retryCount} 次仍失败，移除死信:`, item.data && item.data.question_id);
+                    // 35B: 识别不可重试的客户端错误（HTTP 4xx，除 429 限流外）
+                    // sendToBackend 内部已对 4xx break 不重试，但 processPendingQueue
+                    // 仍会每分钟重新调用一次，导致 400/401/422 等永久失败的条目被
+                    // 无意义重试 10 次（耗时 10 分钟）。此处识别后立即死信，不再等待。
+                    const errMsg = result.error || '';
+                    const isClientError = /^HTTP 4\d{2}$/.test(errMsg) && errMsg !== 'HTTP 429';
+
+                    if (isClientError) {
+                        // 不可重试错误：立即死信
+                        const reason = 'client_error_' + errMsg.replace('HTTP ', '');
+                        console.warn(`队列项 ${item.queue_id} 遇到不可重试错误 ${errMsg}，立即死信:`, item.data && (item.data.question_id || item.data.paper_name));
+                        await addToDeadLetterQueue(item, reason);
                         await removeFromPendingQueueById(item.queue_id);
                         deadLetterCount++;
+                        // 35D: session 死信后标记历史为 dead
+                        if (item.type === 'session' && item.data) {
+                            await markSessionHistoryDead(item.data.paper_name, item.data.submitted_at);
+                        }
                     } else {
-                        // 更新 retryCount 到 storage
-                        await updateQueueItem(item);
+                        // 可重试错误（网络异常/5xx/429）：递增 retryCount
+                        item.retryCount = (item.retryCount || 0) + 1;
+                        if (item.retryCount >= MAX_ITEM_RETRIES) {
+                            console.warn(`队列项 ${item.queue_id} 重试 ${item.retryCount} 次仍失败，移除死信:`, item.data && (item.data.question_id || item.data.paper_name));
+                            // 35C: 死信前持久化到 dead_letter_queue，避免数据无痕丢失
+                            await addToDeadLetterQueue(item, 'max_retries_exceeded');
+                            await removeFromPendingQueueById(item.queue_id);
+                            deadLetterCount++;
+                            // 35D: session 死信后标记历史为 dead
+                            if (item.type === 'session' && item.data) {
+                                await markSessionHistoryDead(item.data.paper_name, item.data.submitted_at);
+                            }
+                        } else {
+                            // 更新 retryCount 到 storage
+                            await updateQueueItem(item);
+                        }
                     }
                     failedCount++;
                 }
@@ -617,6 +645,69 @@ async function updateQueueItem(item) {
         await chrome.storage.local.set({ [PENDING_QUEUE_KEY]: queue });
     } catch (e) {
         console.error('更新队列条目失败:', e);
+    }
+}
+
+// 35C: 死信队列 — 重试耗尽或遇到不可重试错误时，将条目移入死信队列持久化，
+// 避免数据无痕丢失。用户可通过 getDeadLetterCount/clearDeadLetterQueue 消息查看/清理。
+async function addToDeadLetterQueue(item, reason) {
+    try {
+        const result = await chrome.storage.local.get(DEAD_LETTER_QUEUE_KEY);
+        const queue = result[DEAD_LETTER_QUEUE_KEY] || [];
+        queue.unshift({
+            type: item.type || 'question',
+            data: item.data,
+            reason: reason || 'max_retries_exceeded',
+            retry_count: item.retryCount || 0,
+            dead_letter_at: Date.now()
+        });
+        if (queue.length > DEAD_LETTER_LIMIT) {
+            queue.length = DEAD_LETTER_LIMIT;
+        }
+        await chrome.storage.local.set({ [DEAD_LETTER_QUEUE_KEY]: queue });
+    } catch (e) {
+        console.error('写入死信队列失败:', e);
+    }
+}
+
+async function getDeadLetterQueue() {
+    try {
+        const result = await chrome.storage.local.get(DEAD_LETTER_QUEUE_KEY);
+        return result[DEAD_LETTER_QUEUE_KEY] || [];
+    } catch (e) {
+        console.error('读取死信队列失败:', e);
+        return [];
+    }
+}
+
+async function clearDeadLetterQueue() {
+    try {
+        await chrome.storage.local.set({ [DEAD_LETTER_QUEUE_KEY]: [] });
+    } catch (e) {
+        console.error('清空死信队列失败:', e);
+    }
+}
+
+// 35D: session 死信后，将对应历史条目标记为 dead，避免 popup 仍显示"待同步"误导用户
+async function markSessionHistoryDead(paperName, submittedAt) {
+    if (!paperName || !submittedAt) return;
+    try {
+        const result = await chrome.storage.local.get(SESSION_HISTORY_KEY);
+        const history = result[SESSION_HISTORY_KEY] || [];
+        let modified = false;
+        for (const h of history) {
+            if (h && h.paper_name === paperName && h.submitted_at === submittedAt) {
+                h.synced = 'dead';
+                h.dead_at = Date.now();
+                modified = true;
+                break;
+            }
+        }
+        if (modified) {
+            await chrome.storage.local.set({ [SESSION_HISTORY_KEY]: history });
+        }
+    } catch (e) {
+        console.error('标记会话历史为死信失败:', e);
     }
 }
 
@@ -784,11 +875,16 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     } else if (request.action === 'loadStats') {
         // popup 通过 background 中转拉取统计，避免 popup 直接跨域请求
         // 必须携带 user_id，否则后端返回 default_user 的统计，与采集的数据脱节
-        const statsUrl = API_URL.replace('/wrong-questions', '/stats/overview') +
-                         '?user_id=' + encodeURIComponent(getUserId());
-        fetch(statsUrl, {
-            method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+        // 35A: SW 重启后 cachedUserId 可能尚未从 storage 加载完成（仍为 ''），
+        // 此时 getUserId() 返回 'default_user'，拉取的统计与用户实际数据脱节。
+        // 必须先等待 ensureInitialized() 完成，确保 cachedUserId 已就绪。
+        ensureInitialized().then(() => {
+            const statsUrl = API_URL.replace('/wrong-questions', '/stats/overview') +
+                             '?user_id=' + encodeURIComponent(getUserId());
+            return fetch(statsUrl, {
+                method: 'GET',
+                headers: { 'Content-Type': 'application/json' }
+            });
         })
         .then(response => response.json())
         .then(data => {
@@ -814,6 +910,21 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
             sendResponse({ success: true, items: history });
         }).catch(error => {
             sendResponse({ success: false, error: error.message, items: [] });
+        });
+        return true;
+    } else if (request.action === 'getDeadLetterCount') {
+        // 35C: 暴露死信队列数量给 popup，让用户感知到数据丢失
+        getDeadLetterQueue().then(queue => {
+            sendResponse({ success: true, count: queue.length });
+        }).catch(() => {
+            sendResponse({ success: true, count: 0 });
+        });
+        return true;
+    } else if (request.action === 'clearDeadLetterQueue') {
+        clearDeadLetterQueue().then(() => {
+            sendResponse({ success: true });
+        }).catch(error => {
+            sendResponse({ success: false, error: error.message });
         });
         return true;
     }
