@@ -190,7 +190,12 @@ function generateQuestionId(questionText) {
     // 使用双哈希降低碰撞概率：32 位 DJP 哈希约 4.6 万题有 50% 碰撞，
     // 双哈希拼接（两个不同 seed）将碰撞空间扩大到 ~2^64，足够软考场景使用。
     // 只基于题目文本，不加 Date.now()，保证同一道题每次生成相同 ID（后端 UPSERT 去重依赖）。
-    const text = questionText.replace(/\s+/g, '').substring(0, 200);
+    //
+    // 32A: 旧逻辑截断到 200 字符再哈希，导致两道题前 200 字符相同（如共用案例背景的长题）
+    // 会生成相同 ID，后端 UPSERT 把它们当作同一题，数据互相覆盖。
+    // 修复：不截断，对完整文本（去空白后）做哈希。题目文本本身已有 5000 字符上限，
+    // JS 字符串 charCodeAt 是 UTF-16，对 5000 字符做哈希只需几毫秒，无性能问题。
+    const text = questionText.replace(/\s+/g, '');
 
     const djb2Hash = function(seed) {
         let h = seed;
@@ -332,8 +337,32 @@ function extractOptions(questionElement) {
         return options;
     }
 
+    // 32B/32C: 去重集合 + 直接子选项限制
+    // 旧 bug 1：querySelectorAll 查询所有后代，若 A 选项内嵌套另一个选项列表（如
+    //   "以上全部" 选项内含子选项），子选项会被重复提取
+    // 旧 bug 2：同一选项同时匹配多个选择器（如同时有 .option-item 和 .exam-option
+    //   类名），会被 push 两次
+    // 修复：用 Set 按文本去重；query 限定 :scope > 直接子选项
+    const seenTexts = new Set();
+    const dedupePush = function(text) {
+        const t = (text || '').trim();
+        if (!t || t.length === 0 || t.length >= 200) return;
+        if (seenTexts.has(t)) return;
+        seenTexts.add(t);
+        options.push(t);
+    };
+
     try {
-        const optionElements = container.querySelectorAll(OPTION_ITEM_SELECTORS);
+        // 限定为容器的直接子选项，避免嵌套选项被重复提取
+        const directItemSelector = OPTION_ITEM_SELECTORS.split(',').map(s => ':scope > ' + s.trim()).join(', ');
+        let optionElements;
+        try {
+            optionElements = container.querySelectorAll(directItemSelector);
+        } catch (e) {
+            // :scope > 选择器在某些旧浏览器不支持，回退到全量查询 + 去重
+            optionElements = container.querySelectorAll(OPTION_ITEM_SELECTORS);
+        }
+
         optionElements.forEach((optionElement) => {
             try {
                 const optionLabelElement = optionElement.querySelector(OPTION_LABEL_SELECTORS);
@@ -341,13 +370,10 @@ function extractOptions(questionElement) {
                 if (optionLabelElement && contentElement) {
                     const optionLabel = optionLabelElement.textContent.trim();
                     const optionContent = contentElement.textContent.trim();
-                    options.push(`${optionLabel} ${optionContent}`);
+                    dedupePush(`${optionLabel} ${optionContent}`);
                 } else {
                     // 降级：直接取整段文本作为选项（标签与内容未分离时）
-                    const fullText = optionElement.textContent.trim();
-                    if (fullText && fullText.length > 0 && fullText.length < 200) {
-                        options.push(fullText);
-                    }
+                    dedupePush(optionElement.textContent);
                 }
             } catch (e) {
                 console.warn('提取单个选项失败:', e);
@@ -547,7 +573,22 @@ function collectQuestionElement(questionEl) {
         try {
             const optionsContainer = questionEl.querySelector(OPTIONS_SELECTORS.join(','));
             if (optionsContainer) {
-                const optionElements = optionsContainer.querySelectorAll(OPTION_ITEM_SELECTORS);
+                // 32B/32C: 与 extractOptions 一致，去重 + 限定直接子选项
+                const seenTexts = new Set();
+                const dedupePush = function(text) {
+                    const t = (text || '').trim();
+                    if (!t || t.length === 0 || t.length >= 200) return;
+                    if (seenTexts.has(t)) return;
+                    seenTexts.add(t);
+                    options.push(t);
+                };
+                const directItemSelector = OPTION_ITEM_SELECTORS.split(',').map(s => ':scope > ' + s.trim()).join(', ');
+                let optionElements;
+                try {
+                    optionElements = optionsContainer.querySelectorAll(directItemSelector);
+                } catch (e) {
+                    optionElements = optionsContainer.querySelectorAll(OPTION_ITEM_SELECTORS);
+                }
                 optionElements.forEach((optionElement) => {
                     try {
                         const optionLabelElement = optionElement.querySelector(OPTION_LABEL_SELECTORS);
@@ -555,12 +596,9 @@ function collectQuestionElement(questionEl) {
                         if (optionLabelElement && contentElement) {
                             const optionLabel = optionLabelElement.textContent.trim();
                             const optionContent = contentElement.textContent.trim();
-                            options.push(`${optionLabel} ${optionContent}`);
+                            dedupePush(`${optionLabel} ${optionContent}`);
                         } else {
-                            const fullText = optionElement.textContent.trim();
-                            if (fullText && fullText.length > 0 && fullText.length < 200) {
-                                options.push(fullText);
-                            }
+                            dedupePush(optionElement.textContent);
                         }
                     } catch (e) {
                     }
