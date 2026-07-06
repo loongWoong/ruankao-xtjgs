@@ -749,20 +749,25 @@ async function collectAllWrongQuestions() {
         // 全去重场景（所有题都在 5 分钟内已发过）：inserted=0, updated=0, skipped>0
         // 此时不应判为失败，数据已在库中，应返回 success=true 让 popup 显示"已采集"而非"采集失败"
         const allDeduped = dedupedCount > 0 && successCount === 0 && failCount === 0;
+        // 全入队场景（网络不通，所有题进入离线队列等待重试）：也不应判为失败
+        // 旧逻辑只看 successCount，导致 popup 显示"采集失败：未知错误"，用户以为数据丢了
+        const queuedCount = batchResult ? (batchResult.queued || 0) : 0;
+        const allQueued = queuedCount > 0 && successCount === 0 && failCount === 0;
         const resultMsg = `采集完成：共 ${collectedQuestions.length} 道` +
             `，成功 ${successCount}` +
             (dedupedCount > 0 ? `，去重 ${dedupedCount}` : '') +
             (failCount > 0 ? `，失败 ${failCount}` : '') +
-            (batchResult && batchResult.queued ? `，离线队列 ${batchResult.queued}` : '') +
-            (allDeduped ? '（均已采集，无需重复）' : '');
+            (queuedCount > 0 ? `，离线队列 ${queuedCount}` : '') +
+            (allDeduped ? '（均已采集，无需重复）' : '') +
+            (allQueued ? '（网络不通，已加入离线队列）' : '');
         console.log(resultMsg);
         try {
-            showNotification(resultMsg, (successCount > 0 || allDeduped) ? 'success' : 'error');
+            showNotification(resultMsg, (successCount > 0 || allDeduped || allQueued) ? 'success' : 'error');
         } catch (e) {
         }
 
         return {
-            success: successCount > 0 || allDeduped,
+            success: successCount > 0 || allDeduped || allQueued,
             total: collectedQuestions.length,  // 实际采集到的题目数（而非容器数）
             containerCount: questionElements.length,  // 找到的题目容器数
             dedupedCount: dedupedCount,  // 去重掉的题目数
@@ -877,7 +882,7 @@ function showNotification(message, type) {
             color: white;
             border-radius: 8px;
             box-shadow: 0 4px 12px rgba(0,0,0,0.15);
-            z-index: 10000;
+            z-index: 2147483647;  // 最大 int32，确保覆盖站点任何弹层
             font-family: Arial, sans-serif;
             font-size: 14px;
             animation: slideIn 0.3s ease;
@@ -1110,6 +1115,14 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     } else if (request.action === 'collectPracticeSession') {
         const result = collectPracticeSession();
         sendResponse(result);
+    } else if (request.action === 'showNotification') {
+        // background.js（右键菜单/快捷键路径）在 sendToBackend 完成后通过此 action 回传结果
+        // 让 content.js 在页面上展示通知，与 popup 路径的反馈体验保持一致
+        try {
+            showNotification(request.message || '操作完成', request.type || 'info');
+        } catch (e) {
+        }
+        sendResponse({ success: true });
     } else {
         // 未知 action 显式返回错误，避免调用方 callback 永不触发
         console.warn('content.js 收到未知 action:', request.action);

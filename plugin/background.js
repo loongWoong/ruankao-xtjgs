@@ -8,7 +8,7 @@ const USER_ID_STORAGE_KEY = 'plugin_user_id';
 const DEDUP_TTL = 5 * 60 * 1000;
 const MAX_RETRIES = 3;
 const ALARM_NAME = 'retry_pending_queue';
-const ALARM_INTERVAL = 0.5;
+const ALARM_INTERVAL = 1;  // Chrome MV3 alarms 最小周期为 1 分钟，低于 1 会被上取整
 const BATCH_CHUNK_SIZE = 200;
 const SESSION_HISTORY_LIMIT = 50;  // 提升上限：旧值 20 在用户一天多套练习时易丢失早期记录
 
@@ -477,7 +477,7 @@ async function getSessionHistory() {
     }
 }
 
-// 队列处理互斥锁：alarm（每30秒）与 popup retry 按钮可并发触发 processPendingQueue，
+// 队列处理互斥锁：alarm（每 1 分钟）与 popup retry 按钮可并发触发 processPendingQueue，
 // 若不互斥，两个实例各自读取同一快照、各自 sendToBackend(skipDedup=true)，
 // 后端收到两条相同 question_id 的 POST，wrong_count 被累加。
 let isProcessingQueue = false;
@@ -577,25 +577,50 @@ chrome.contextMenus.onClicked.addListener(function(info, tab) {
         chrome.tabs.sendMessage(tab.id, {action: 'collectCurrentQuestion'}, async function(response) {
             if (chrome.runtime.lastError) {
                 console.error('发送消息失败:', chrome.runtime.lastError);
+                try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '采集失败：内容脚本未加载，请刷新页面', type: 'error'}); } catch (e) {}
                 return;
             }
             console.log('采集结果:', response);
             if (response && response.success && response.data) {
                 // 等待初始化完成，避免 SW 重启后 cachedUserId 为空导致数据落到 default_user
                 await ensureInitialized();
-                await sendToBackend(response.data);
+                const result = await sendToBackend(response.data);
+                // 29B: 向页面回传发送结果通知，与 popup 路径反馈体验一致
+                notifyTab(tab.id, result);
+            } else if (response && !response.success) {
+                try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '采集失败：' + (response.error || '未找到题目'), type: 'error'}); } catch (e) {}
             }
         });
     } else if (info.menuItemId === 'collectAllWrong') {
         chrome.tabs.sendMessage(tab.id, {action: 'collectAllWrongQuestions'}, function(response) {
             if (chrome.runtime.lastError) {
                 console.error('发送消息失败:', chrome.runtime.lastError);
+                try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '采集失败：内容脚本未加载，请刷新页面', type: 'error'}); } catch (e) {}
                 return;
             }
             console.log('采集所有错题结果:', response);
+            // collectAllWrongQuestions 内部已通过 showNotification 展示结果，无需再重复通知
         });
     }
 });
+
+// 29B: 根据 sendToBackend 返回结果向页面发送通知
+function notifyTab(tabId, result) {
+    try {
+        if (!result) return;
+        if (result.success && !result.skipped && !result.queued) {
+            chrome.tabs.sendMessage(tabId, {action: 'showNotification', message: '✓ 采集并发送成功！', type: 'success'});
+        } else if (result.skipped) {
+            chrome.tabs.sendMessage(tabId, {action: 'showNotification', message: '题目已采集，无需重复', type: 'info'});
+        } else if (result.queued) {
+            chrome.tabs.sendMessage(tabId, {action: 'showNotification', message: '网络异常，已加入待发送队列', type: 'info'});
+        } else {
+            chrome.tabs.sendMessage(tabId, {action: 'showNotification', message: '发送失败：' + (result.error || '未知错误'), type: 'error'});
+        }
+    } catch (e) {
+        console.warn('发送通知到页面失败:', e);
+    }
+}
 
 chrome.commands.onCommand.addListener(function(command) {
     if (command === 'collect-question') {
@@ -613,19 +638,25 @@ chrome.commands.onCommand.addListener(function(command) {
             // 旧逻辑只认 /exam，导致 /practice /paper /mock 页面快捷键静默失效，但右键菜单却能采集（不一致）
             if (!tab.url || !/ruankaodaren\.com\/(exam|practice|test|paper|mock)/i.test(tab.url)) {
                 console.log('当前页面不是软考达人练习页面');
+                try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '当前页面不是软考达人练习页面', type: 'error'}); } catch (e) {}
                 return;
             }
 
             chrome.tabs.sendMessage(tab.id, {action: 'collectCurrentQuestion'}, async function(response) {
                 if (chrome.runtime.lastError) {
                     console.error('发送消息失败:', chrome.runtime.lastError);
+                    try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '采集失败：内容脚本未加载，请刷新页面', type: 'error'}); } catch (e) {}
                     return;
                 }
                 console.log('快捷键采集结果:', response);
                 if (response && response.success && response.data) {
                     // 等待初始化完成，避免 SW 重启后 cachedUserId 为空导致数据落到 default_user
                     await ensureInitialized();
-                    await sendToBackend(response.data);
+                    const result = await sendToBackend(response.data);
+                    // 29B: 向页面回传发送结果通知
+                    notifyTab(tab.id, result);
+                } else if (response && !response.success) {
+                    try { chrome.tabs.sendMessage(tab.id, {action: 'showNotification', message: '采集失败：' + (response.error || '未找到题目'), type: 'error'}); } catch (e) {}
                 }
             });
         });
