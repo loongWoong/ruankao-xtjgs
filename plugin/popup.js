@@ -26,8 +26,17 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // D6: popup 打开期间每 5 秒轮询队列数量，确保用户及时看到离线堆积
     // popup 关闭时 interval 自动清除（popup 上下文销毁），无需手动 cleanup
+    let pollTickCount = 0;
     const pollTimer = setInterval(function() {
         loadPendingQueueCount();
+        // 30B: 每 5 秒刷新后端状态（后端恢复时及时从"离线"切回"在线"）
+        checkBackendStatus();
+        // 30C: 每 30 秒（6 轮）刷新一次统计（比队列/状态重，频率低些避免给后端压力）
+        pollTickCount++;
+        if (pollTickCount % 6 === 0) {
+            loadStats();
+            loadSessionHistory();
+        }
     }, 5000);
 
     // 兜底：页面卸载时清除 timer（虽然 popup 关闭即销毁，此为防御性编程）

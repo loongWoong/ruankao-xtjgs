@@ -2148,46 +2148,81 @@ def _upsert_wrong_question_record(cursor, data, user_id=None):
 
     # UPSERT 去重：基于 question_id + user_id 检查是否已存在
     existing_id = None
+    existing_user_answer = ''
     if clean_question_id:
         cursor.execute(
-            'SELECT id FROM wrong_questions WHERE question_id = ? AND user_id = ?',
+            'SELECT id, user_answer FROM wrong_questions WHERE question_id = ? AND user_id = ?',
             (clean_question_id, clean_user_id)
         )
         row = cursor.fetchone()
         if row:
             existing_id = row[0]
+            existing_user_answer = row[1] or ''
 
     if existing_id:
         # 已存在：更新作答记录和错误次数
         # correct_answer/options/analysis/category/chapter 仅在原值为空时补充
         # （首次采集可能无答案，交卷后再次采集时补全）
+        #
+        # wrong_count 增量策略：仅在"真正的再次答错"时 +1，避免答案补全场景双计数
+        #   - 原记录 user_answer 为空 + 新数据有 user_answer → 答案补全，不增量
+        #   - 原记录 user_answer 非空 + 新数据 user_answer 相同 → 重复采集，不增量
+        #   - 原记录 user_answer 非空 + 新数据 user_answer 不同 → 新的答错尝试，+1
+        should_increment = bool(clean_user_answer) and (existing_user_answer != clean_user_answer)
+
         clean_options_json = json.dumps(clean_options)
-        cursor.execute('''
-            UPDATE wrong_questions
-            SET user_answer = ?,
-                correct_answer = COALESCE(NULLIF(?, ''), correct_answer),
-                options = CASE
-                    WHEN ? IS NOT NULL AND ? NOT IN ('', '[]')
-                         AND (options IS NULL OR options = '' OR options = '[]')
-                    THEN ? ELSE options END,
-                analysis = COALESCE(NULLIF(?, ''), analysis),
-                category = COALESCE(NULLIF(?, ''), category),
-                chapter = COALESCE(NULLIF(?, ''), chapter),
-                wrong_count = wrong_count + 1,
-                error_count = error_count + 1,
-                last_error_at = CURRENT_TIMESTAMP,
-                source_url = COALESCE(NULLIF(?, ''), source_url)
-            WHERE id = ?
-        ''', (
-            clean_user_answer,
-            clean_correct_answer,
-            clean_options_json, clean_options_json, clean_options_json,
-            clean_analysis,
-            clean_category,
-            clean_chapter,
-            clean_source_url,
-            existing_id
-        ))
+        if should_increment:
+            cursor.execute('''
+                UPDATE wrong_questions
+                SET user_answer = ?,
+                    correct_answer = COALESCE(NULLIF(?, ''), correct_answer),
+                    options = CASE
+                        WHEN ? IS NOT NULL AND ? NOT IN ('', '[]')
+                             AND (options IS NULL OR options = '' OR options = '[]')
+                        THEN ? ELSE options END,
+                    analysis = COALESCE(NULLIF(?, ''), analysis),
+                    category = COALESCE(NULLIF(?, ''), category),
+                    chapter = COALESCE(NULLIF(?, ''), chapter),
+                    wrong_count = wrong_count + 1,
+                    error_count = error_count + 1,
+                    last_error_at = CURRENT_TIMESTAMP,
+                    source_url = COALESCE(NULLIF(?, ''), source_url)
+                WHERE id = ?
+            ''', (
+                clean_user_answer,
+                clean_correct_answer,
+                clean_options_json, clean_options_json, clean_options_json,
+                clean_analysis,
+                clean_category,
+                clean_chapter,
+                clean_source_url,
+                existing_id
+            ))
+        else:
+            # 答案补全或重复采集：只更新字段，不增量 wrong_count/error_count
+            cursor.execute('''
+                UPDATE wrong_questions
+                SET user_answer = COALESCE(NULLIF(?, ''), user_answer),
+                    correct_answer = COALESCE(NULLIF(?, ''), correct_answer),
+                    options = CASE
+                        WHEN ? IS NOT NULL AND ? NOT IN ('', '[]')
+                             AND (options IS NULL OR options = '' OR options = '[]')
+                        THEN ? ELSE options END,
+                    analysis = COALESCE(NULLIF(?, ''), analysis),
+                    category = COALESCE(NULLIF(?, ''), category),
+                    chapter = COALESCE(NULLIF(?, ''), chapter),
+                    source_url = COALESCE(NULLIF(?, ''), source_url)
+                WHERE id = ?
+            ''', (
+                clean_user_answer,
+                clean_correct_answer,
+                clean_options_json, clean_options_json, clean_options_json,
+                clean_analysis,
+                clean_category,
+                clean_chapter,
+                clean_source_url,
+                existing_id
+            ))
         q_id = existing_id
         is_new = False
     else:
