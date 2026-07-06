@@ -23,6 +23,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     }
+
+    // D6: popup 打开期间每 5 秒轮询队列数量，确保用户及时看到离线堆积
+    // popup 关闭时 interval 自动清除（popup 上下文销毁），无需手动 cleanup
+    const pollTimer = setInterval(function() {
+        loadPendingQueueCount();
+    }, 5000);
+
+    // 兜底：页面卸载时清除 timer（虽然 popup 关闭即销毁，此为防御性编程）
+    window.addEventListener('unload', function() {
+        clearInterval(pollTimer);
+    });
 });
 
 const USER_ID_STORAGE_KEY = 'plugin_user_id';
@@ -85,9 +96,10 @@ function loadStats() {
 }
 
 function setStatsEmpty() {
-    document.getElementById('statTotal').textContent = '0';
-    document.getElementById('statMastered').textContent = '0';
-    document.getElementById('statToday').textContent = '0';
+    // 加载失败时显示 '--' 而非 '0'，避免误导用户以为真的没有数据
+    document.getElementById('statTotal').textContent = '--';
+    document.getElementById('statMastered').textContent = '--';
+    document.getElementById('statToday').textContent = '--';
 }
 
 function checkBackendStatus() {
@@ -201,11 +213,18 @@ document.getElementById('openDashboard').addEventListener('click', function() {
 });
 
 document.getElementById('collect').addEventListener('click', function() {
+    const btn = this;
+    // D2: 防止重复点击导致重复采集/发送
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const done = function() { btn.disabled = false; };
+
     showStatus('正在采集...', 'info');
 
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
         if (!tabs || tabs.length === 0) {
             showStatus('无法获取当前标签页', 'error');
+            done();
             return;
         }
 
@@ -214,6 +233,7 @@ document.getElementById('collect').addEventListener('click', function() {
                 if (chrome.runtime.lastError) {
                     console.error('Chrome runtime error:', chrome.runtime.lastError);
                     showStatus('采集失败：内容脚本未加载，请刷新页面后重试', 'error');
+                    done();
                     return;
                 }
 
@@ -229,6 +249,7 @@ document.getElementById('collect').addEventListener('click', function() {
                             action: 'sendToBackend',
                             data: response.data
                         }, function(backendResponse) {
+                            done();
                             if (chrome.runtime.lastError) {
                                 showStatus('发送失败：' + chrome.runtime.lastError.message, 'error');
                                 return;
@@ -251,29 +272,40 @@ document.getElementById('collect').addEventListener('click', function() {
                         });
                     } else {
                         showStatus('采集失败：' + (response.error || '未知错误'), 'error');
+                        done();
                     }
                 } else {
                     showStatus('采集失败：无法与页面通信', 'error');
+                    done();
                 }
             });
         } catch (e) {
             console.error('发送消息异常:', e);
             showStatus('采集失败：' + e.message, 'error');
+            done();
         }
     });
 });
 
 document.getElementById('collectAll').addEventListener('click', function() {
+    const btn = this;
+    // D2: 批量采集耗时较长，必须防止重复点击
+    if (btn.disabled) return;
+    btn.disabled = true;
+    const done = function() { btn.disabled = false; };
+
     showStatus('正在采集所有错题，请稍候...', 'info');
 
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
         if (!tabs || tabs.length === 0) {
             showStatus('无法获取当前标签页', 'error');
+            done();
             return;
         }
 
         try {
             chrome.tabs.sendMessage(tabs[0].id, {action: 'collectAllWrongQuestions'}, function(response) {
+                done();
                 if (chrome.runtime.lastError) {
                     console.error('Chrome runtime error:', chrome.runtime.lastError);
                     showStatus('采集失败：内容脚本未加载，请刷新页面后重试', 'error');
@@ -316,6 +348,7 @@ document.getElementById('collectAll').addEventListener('click', function() {
         } catch (e) {
             console.error('发送消息异常:', e);
             showStatus('采集失败：' + e.message, 'error');
+            done();
         }
     });
 });
@@ -334,11 +367,18 @@ function showStatus(message, type) {
 }
 
 function collectPracticeSession() {
+    const btn = document.getElementById('collectSession');
+    // D2: 防止重复点击
+    if (btn && btn.disabled) return;
+    if (btn) btn.disabled = true;
+    const done = function() { if (btn) btn.disabled = false; };
+
     showStatus('正在采集练习结果...', 'info');
 
     chrome.tabs.query({active: true, currentWindow: true}, function(tabs) {
         if (!tabs || tabs.length === 0) {
             showStatus('无法获取当前标签页', 'error');
+            done();
             return;
         }
 
@@ -347,6 +387,7 @@ function collectPracticeSession() {
                 if (chrome.runtime.lastError) {
                     console.error('Chrome runtime error:', chrome.runtime.lastError);
                     showStatus('采集失败：内容脚本未加载，请刷新页面后重试', 'error');
+                    done();
                     return;
                 }
 
@@ -357,6 +398,7 @@ function collectPracticeSession() {
                             action: 'sendSession',
                             data: response.data
                         }, function(backendResponse) {
+                            done();
                             if (chrome.runtime.lastError) {
                                 showStatus('发送失败：' + chrome.runtime.lastError.message, 'error');
                                 return;
@@ -376,14 +418,17 @@ function collectPracticeSession() {
                         });
                     } else {
                         showStatus('采集失败：' + (response.error || '未识别到结果页，请在交卷结果页使用'), 'error');
+                        done();
                     }
                 } else {
                     showStatus('采集失败：无法与页面通信', 'error');
+                    done();
                 }
             });
         } catch (e) {
             console.error('发送消息异常:', e);
             showStatus('采集失败：' + e.message, 'error');
+            done();
         }
     });
 }
@@ -422,13 +467,32 @@ function renderSessionHistory(items) {
         const scoreText = item.score > 0 ? item.score + '分' : Math.round((item.accuracy || 0) * 100) + '%';
         const correctText = item.total_questions > 0 ? (item.correct_count + '/' + item.total_questions) : '';
         const syncIcon = item.synced ? '<span class="history-item-synced">✓</span>' : '<span class="history-item-unsynced">待同步</span>';
+        // D4: 展示相对时间，让用户知道这条记录是何时采集的
+        const timeText = formatRelativeTime(item.synced_at || item.timestamp);
         return '<div class="history-item">' +
             '<div class="history-item-name">' + escapeHtml(name) + '</div>' +
-            '<div class="history-item-score">' + correctText + ' ' + scoreText + '</div>' +
+            '<div class="history-item-score">' + correctText + ' ' + scoreText +
+            (timeText ? ' <span class="history-item-time">' + timeText + '</span>' : '') +
+            '</div>' +
             syncIcon +
             '</div>';
     }).join('');
     container.innerHTML = html;
+}
+
+// D4: 将时间戳转为相对时间描述（如"3分钟前""2小时前"）
+function formatRelativeTime(ts) {
+    if (!ts || typeof ts !== 'number') return '';
+    const now = Date.now();
+    const diff = now - ts;
+    if (diff < 0) return '';
+    if (diff < 60 * 1000) return '刚刚';
+    if (diff < 60 * 60 * 1000) return Math.floor(diff / (60 * 1000)) + '分钟前';
+    if (diff < 24 * 60 * 60 * 1000) return Math.floor(diff / (60 * 60 * 1000)) + '小时前';
+    if (diff < 30 * 24 * 60 * 60 * 1000) return Math.floor(diff / (24 * 60 * 60 * 1000)) + '天前';
+    // 超过 30 天显示日期
+    const d = new Date(ts);
+    return (d.getMonth() + 1) + '月' + d.getDate() + '日';
 }
 
 function escapeHtml(text) {

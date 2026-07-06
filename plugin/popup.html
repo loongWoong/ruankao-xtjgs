@@ -96,6 +96,12 @@
             transform: translateY(-1px);
             box-shadow: 0 2px 8px rgba(102, 126, 234, 0.4);
         }
+        button:disabled {
+            opacity: 0.5;
+            cursor: not-allowed;
+            transform: none !important;
+            box-shadow: none !important;
+        }
         button.secondary {
             background: #f0f0f0;
             color: #333;
@@ -222,6 +228,12 @@
             font-weight: 600;
             color: #667eea;
             white-space: nowrap;
+        }
+        .history-item-time {
+            font-size: 10px;
+            font-weight: 400;
+            color: #6b7280;
+            margin-left: 4px;
         }
         .history-item-synced {
             font-size: 10px;

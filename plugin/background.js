@@ -685,15 +685,20 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         });
         return true;
     } else if (request.action === 'checkBackendStatus') {
-        // 使用轻量级 /api/health 接口检测后端存活，避免拉取重量级 stats/overview
+        // B5: 使用 AbortController 3 秒超时，避免后端不可达时 popup 长时间等待
+        const controller = new AbortController();
+        const timeoutId = setTimeout(function() { controller.abort(); }, 3000);
         fetch(API_URL.replace('/wrong-questions', '/health'), {
             method: 'GET',
-            headers: { 'Content-Type': 'application/json' }
+            headers: { 'Content-Type': 'application/json' },
+            signal: controller.signal
         })
         .then(response => {
+            clearTimeout(timeoutId);
             sendResponse({ online: response.ok });
         })
         .catch(() => {
+            clearTimeout(timeoutId);
             sendResponse({ online: false });
         });
         return true;
@@ -734,7 +739,10 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
         return true;
     }
 
-    return true;
+    // B4: 未知 action 显式返回错误，避免调用方一直等待响应（导致 callback 永不触发）
+    console.warn('收到未知 action:', request.action);
+    sendResponse({ success: false, error: 'Unknown action: ' + (request.action || '(empty)') });
+    return false;
 });
 
 console.log('Background script loaded');
