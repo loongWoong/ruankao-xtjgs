@@ -102,7 +102,9 @@ async function saveDedupMap() {
         const now = Date.now();
         let cleaned = 0;
         for (const qid in dedupMap) {
-            if (now - dedupMap[qid] >= DEDUP_TTL) {
+            const entry = dedupMap[qid];
+            const ts = typeof entry === 'number' ? entry : (entry && entry.ts);
+            if (!ts || (now - ts) >= DEDUP_TTL) {
                 delete dedupMap[qid];
                 cleaned++;
             }
@@ -116,29 +118,42 @@ async function saveDedupMap() {
     }
 }
 
-function isDuplicate(questionId) {
+function isDuplicate(questionId, hasAnswer = false) {
     // 只读检查：仅判断是否在去重窗口内，不写入 dedupMap
     if (!questionId) return false;
     const now = Date.now();
-    if (dedupMap[questionId] && (now - dedupMap[questionId]) < DEDUP_TTL) {
-        return true;
-    }
-    return false;
+    const entry = dedupMap[questionId];
+    if (!entry) return false;
+
+    // 兼容旧格式（纯数字时间戳）和新格式（{ts, has_answer}）
+    const ts = typeof entry === 'number' ? entry : entry.ts;
+    const prevHasAnswer = typeof entry === 'object' ? !!entry.has_answer : false;
+
+    if ((now - ts) >= DEDUP_TTL) return false;
+    // 关键升级场景：之前发送的没答案，本次有答案 → 允许补全
+    if (!prevHasAnswer && hasAnswer) return false;
+    return true;
 }
 
-function markSent(questionId) {
+function markSent(questionId, hasAnswer = false) {
     // 发送成功后才标记，避免失败时污染 dedupMap 导致 5 分钟内无法重采
     if (!questionId) return;
-    dedupMap[questionId] = Date.now();
+    dedupMap[questionId] = { ts: Date.now(), has_answer: !!hasAnswer };
     saveDedupMap();
 }
 
 // 批量场景：只更新内存，调用方负责在循环结束后调用 saveDedupMap() 一次写盘
-function markSentBatch(questionIds) {
-    if (!Array.isArray(questionIds) || questionIds.length === 0) return;
+function markSentBatch(items) {
+    // items 可以是字符串数组（旧用法）或 { question_id, has_answer } 对象数组（新用法）
+    if (!Array.isArray(items) || items.length === 0) return;
     const now = Date.now();
-    for (const qid of questionIds) {
-        if (qid) dedupMap[qid] = now;
+    for (const it of items) {
+        if (!it) continue;
+        if (typeof it === 'string') {
+            dedupMap[it] = { ts: now, has_answer: false };
+        } else if (it.question_id) {
+            dedupMap[it.question_id] = { ts: now, has_answer: !!it.has_answer };
+        }
     }
 }
 
@@ -217,7 +232,10 @@ async function setPendingQueue(queue) {
 }
 
 async function sendToBackend(data, skipDedup = false, skipQueueOnFail = false) {
-    if (!skipDedup && data.question_id && isDuplicate(data.question_id)) {
+    // 判断本次数据是否带答案（用于"无答案→有答案"升级场景的去重豁免）
+    const hasAnswer = !!(data.correct_answer || data.user_answer);
+
+    if (!skipDedup && data.question_id && isDuplicate(data.question_id, hasAnswer)) {
         console.log('题目重复，跳过发送:', data.question_id);
         return { success: true, skipped: true, reason: 'duplicate' };
     }
@@ -241,7 +259,7 @@ async function sendToBackend(data, skipDedup = false, skipQueueOnFail = false) {
                 const result = await response.json();
                 console.log('发送到后端成功:', result);
                 // 发送成功后才标记去重，避免失败时污染 dedupMap
-                markSent(data.question_id);
+                markSent(data.question_id, hasAnswer);
                 return { success: true, data: result };
             }
 
@@ -334,8 +352,12 @@ async function sendBatchToBackend(items) {
                     success = true;
                     // 批量发送成功后，标记 question_id 已发送并立即写盘
                     // （多 chunk 场景下，若延迟到循环外写盘，SW 在 chunk 间被 kill 会丢失标记）
-                    const sentIds = chunk.map(item => item && item.question_id).filter(Boolean);
-                    markSentBatch(sentIds);
+                    // 传入 has_answer 标志，支持"无答案→有答案"升级场景的去重豁免
+                    const sentItems = chunk.map(item => item && item.question_id ? {
+                        question_id: item.question_id,
+                        has_answer: !!(item.correct_answer || item.user_answer)
+                    } : null).filter(Boolean);
+                    markSentBatch(sentItems);
                     await saveDedupMap();
                     break;
                 }

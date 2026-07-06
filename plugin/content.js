@@ -238,16 +238,20 @@ function extractQuestionText(questionElement) {
     };
 
     try {
+        // 拼接所有非排除子元素的有效文本（支持多段落题干：案例题/带代码块的题）
         const children = questionElement.children;
+        const parts = [];
         for (let i = 0; i < children.length; i++) {
             const child = children[i];
             if (shouldExclude(child)) continue;
             const text = child.textContent.trim();
-            // 跳过过短文本（<10）和过长文本（>500，可能是选项/解析混入）
-            if (text && text.length >= 10 && text.length <= 500) {
-                questionText = text;
-                break;
+            // 跳过过短文本（<10，可能是标签/序号）和过长文本（>2000，选项/解析混入）
+            if (text && text.length >= 10 && text.length <= 2000) {
+                parts.push(text);
             }
+        }
+        if (parts.length > 0) {
+            questionText = parts.join(' ');
         }
     } catch (e) {
         console.warn('通过子元素提取题目失败:', e);
@@ -257,7 +261,7 @@ function extractQuestionText(questionElement) {
         try {
             if (questionElement.firstElementChild && !shouldExclude(questionElement.firstElementChild)) {
                 const text = questionElement.firstElementChild.textContent.trim();
-                if (text && text.length >= 10 && text.length <= 500) {
+                if (text && text.length >= 10 && text.length <= 2000) {
                     questionText = text;
                 }
             }
