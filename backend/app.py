@@ -2239,6 +2239,7 @@ def _upsert_wrong_question_record(cursor, data, user_id=None):
 
 @app.route('/api/wrong-questions', methods=['POST'])
 @api_response
+@rate_limit
 def add_wrong_question():
     data = request.get_json() or {}
     with get_db_conn() as conn:
@@ -2251,9 +2252,10 @@ def add_wrong_question():
 
 @app.route('/api/wrong-questions/batch', methods=['POST'])
 @api_response
+@rate_limit
 def batch_add_wrong_questions():
     """批量采集错题入库。请求体: {"questions": [...], "user_id": "default_user"}
-    每条记录走 UPSERT 去重，单次最多 200 条，单连接一次性提交以提升性能。
+    每条记录走 UPSERT 去重，单次最多 MAX_BATCH_SIZE 条，单连接一次性提交以提升性能。
     """
     data = request.get_json() or {}
     questions = data.get('questions', [])
@@ -2261,8 +2263,8 @@ def batch_add_wrong_questions():
         return jsonify({'error': 'questions must be a list'}), 400
     if len(questions) == 0:
         return jsonify({'error': 'No questions provided'}), 400
-    if len(questions) > 200:
-        return jsonify({'error': 'questions length must be <= 200'}), 400
+    if len(questions) > MAX_BATCH_SIZE:
+        return jsonify({'error': f'questions length must be <= {MAX_BATCH_SIZE}'}), 400
 
     user_id = sanitize_string(data.get('user_id', 'default_user'), 100) or 'default_user'
 
@@ -2278,7 +2280,10 @@ def batch_add_wrong_questions():
                 failed += 1
                 continue
             try:
-                q_id, is_new = _upsert_wrong_question_record(cursor, q_data, user_id)
+                # 优先使用每条数据自带的 user_id，否则用顶层默认 user_id
+                # （与单条接口语义对齐，支持混合多用户场景）
+                item_user_id = q_data.get('user_id') or user_id
+                q_id, is_new = _upsert_wrong_question_record(cursor, q_data, item_user_id)
                 if q_id is None:
                     failed += 1
                     if len(errors) < 20:
@@ -2306,6 +2311,7 @@ def batch_add_wrong_questions():
 
 @app.route('/api/practice-sessions', methods=['POST'])
 @api_response
+@rate_limit
 def add_practice_session():
     """提交一次练习会话结果（从软考达人网站采集的整套练习/试卷汇总）。
     请求体字段: paper_name, total_questions, correct_count, wrong_count, score,
@@ -2484,10 +2490,11 @@ def get_wrong_questions():
         params = [user_id]
 
         if category:
-            where_clauses.append('category = ?')
+            # 采集时 chapter 存章节名、category 为空，这里用 COALESCE 兼容
+            where_clauses.append('COALESCE(NULLIF(category, ""), chapter) = ?')
             params.append(category)
         if chapter:
-            where_clauses.append('chapter = ?')
+            where_clauses.append('COALESCE(NULLIF(chapter, ""), category) = ?')
             params.append(chapter)
         if is_mastered != '':
             where_clauses.append('is_mastered = ?')
