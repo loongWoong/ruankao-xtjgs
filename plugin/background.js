@@ -383,7 +383,12 @@ async function sendBatchToBackend(items) {
     }
 
     return {
-        success: totalFailed === 0 && totalQueued === 0,
+        // 31D: success 判定修正：
+        //   - totalQueued > 0 表示网络异常，部分数据未发出 → success=false（需重试）
+        //   - totalFailed > 0 但 totalQueued=0 表示部分题目入库失败（如题干空），
+        //     但网络本身正常，已尽力发送，不应判为整体失败（避免 popup 误报"采集失败"）
+        //   - 仅当所有数据都入队（网络全断）时才 success=false
+        success: totalQueued === 0,
         total: items.length,
         inserted: totalInserted,
         updated: totalUpdated,

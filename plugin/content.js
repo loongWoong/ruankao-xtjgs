@@ -491,7 +491,23 @@ function extractAnalysis(questionElement) {
             for (const selector of ANALYSIS_SELECTORS) {
                 const found = el.querySelector(selector);
                 if (found && found.textContent.trim().length > 5) {
-                    return found.textContent.trim();
+                    let text = found.textContent.trim();
+                    // 31A: .right-key 元素同时包含"正确答案 A"和"解析：xxx"，
+                    // 仅截取"解析"标签之后的部分，避免答案/正确率等混入解析字段
+                    // 兼容"解析："、"解析:"、"【解析】"、"答案解析"等多种表述
+                    const analysisIdx = text.search(/(?:【|\[)?\s*(?:答案?解析|解析|分析|试题分析)\s*[】\]:：]/);
+                    if (analysisIdx >= 0) {
+                        // 跳过标签本身，取其后内容
+                        const after = text.substring(analysisIdx).replace(/^(?:【|\[)?\s*(?:答案?解析|解析|分析|试题分析)\s*[】\]:：]\s*/, '');
+                        if (after.trim().length > 5) {
+                            return after.trim();
+                        }
+                    }
+                    // 没有"解析"标签：若文本含"正确答案"等答案标签，说明混入了答案，跳过该元素
+                    if (text.includes('正确答案') || text.includes('你的答案')) {
+                        continue;
+                    }
+                    return text;
                 }
             }
             el = el.parentElement;
@@ -1132,7 +1148,7 @@ chrome.runtime.onMessage.addListener(function(request, sender, sendResponse) {
     return true;
 });
 
-// 注意：快捷键 Ctrl+Shift+C 由 manifest commands 注册 + background.js commands.onCommand 处理。
+// 注意：快捷键 Alt+Shift+C 由 manifest commands 注册 + background.js commands.onCommand 处理。
 // 不在此处监听 keydown，否则会与 background 路径双重触发，导致同一题并发发送两次，
 // 后端 UPSERT UPDATE 累加 wrong_count（R25 修复 processPendingQueue 的同类问题）。
 
@@ -1154,7 +1170,7 @@ function checkNewQuestion() {
         if (newHash && newHash !== currentQuestionHash) {
             currentQuestionHash = newHash;
             console.log('检测到新题目出现');
-            showNotification('检测到新题目，按 Ctrl+Shift+C 可采集', 'info');
+            showNotification('检测到新题目，按 Alt+Shift+C 可采集', 'info');
         }
     } catch (e) {
         console.warn('检查新题目失败:', e);
@@ -1170,7 +1186,7 @@ function checkAnswerRevealed() {
             if (!answerRevealed) {
                 answerRevealed = true;
                 console.log('检测到答案已揭示');
-                showNotification('答案已揭示，按 Ctrl+Shift+C 采集本题', 'info');
+                showNotification('答案已揭示，按 Alt+Shift+C 采集本题', 'info');
             }
         } else {
             // 答案区消失（切到新题），重置标志
@@ -1291,7 +1307,7 @@ function setupSpaNavigationHandler() {
 }
 
 console.log('软考达人错题采集插件已加载');
-console.log('提示：按 Ctrl+Shift+C 可快速采集当前题目');
+console.log('提示：按 Alt+Shift+C 可快速采集当前题目');
 
 currentQuestionHash = getCurrentQuestionHash();
 initMutationObserver();

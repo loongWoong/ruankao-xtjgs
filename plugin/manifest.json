@@ -35,8 +35,8 @@
   "commands": {
     "collect-question": {
       "suggested_key": {
-        "default": "Ctrl+Shift+C",
-        "mac": "Command+Shift+C"
+        "default": "Alt+Shift+C",
+        "mac": "Alt+Shift+C"
       },
       "description": "采集当前题目"
     }
